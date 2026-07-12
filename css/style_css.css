@@ -1,0 +1,232 @@
+:root {
+  --mainColor: #006bff;
+}
+
+.roboto-regular {
+  font-family: "Roboto", sans-serif;
+  font-weight: 400;
+  font-style: normal;
+}
+
+header {
+  border-radius: 10px;
+  border: 2px solid blue;
+  max-width: 450px;
+  text-transform: capitalize;
+  margin: 0 auto;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  margin-top: 30px;
+  margin-bottom: 10px;
+}
+
+header .logo {
+  max-width: 50px;
+}
+
+header .logo img {
+  max-width: 100%;
+}
+
+header h1 {
+  margin: 0;
+  text-align: center;
+  flex: 1;
+}
+
+header span {
+  display: inline-block;
+  transform: translateX(-25px);
+}
+
+#main_map {
+  height: 800px;
+  padding-top: 90px;
+  margin-bottom: 50px;
+  
+}
+
+#div2 {
+  display: block;
+  background-color: yellow;
+  width: 100px;
+  padding: 30px;
+  margin: 30px;
+}
+
+.leaflet-touch .leaflet-control-layers,
+.leaflet-touch .leaflet-bar {
+  background-color: blue;
+  border: none;
+  /* position: fixed; */
+}
+.span1,
+.span2,
+.span3 {
+  display: inline;
+  background-color: yellow;
+  width: 20px;
+  height: 30px;
+  padding: 20px;
+  margin: 30px;
+}
+
+#all-proj-list-show-botton {
+  position: fixed;
+  right: 10px;
+  top: 90px;
+  padding: 10px 15px;
+  border: none;
+  border-radius: 5px;
+  font-size: 15px;
+  font-weight: 600;
+  color: white;
+  background-color: #006bff;
+  cursor: pointer;
+  z-index: 1000;
+}
+
+.leaflet-container .geojson-list {
+  top: 140px;
+  position: fixed;
+  right: 10px;
+  background-color: rgba(255, 255, 255, 0.2);
+  z-index: 1000;
+  box-shadow: 0 1px 7px rgba(0, 0, 0, 0.65);
+  overflow-y: auto;
+}
+
+.leaflet-top {
+  position: fixed;
+  left: 10px;
+  top: 140px;
+}
+
+.leaflet-top .leaflet-control {
+  margin: 0;
+}
+
+.leaflet-control-zoom-in,
+.leaflet-control-zoom-out {
+  color: white !important;
+  background-color: var(--mainColor) !important;
+}
+
+.leaflet-control-zoom-in {
+  border-bottom: 2px solid white !important;
+}
+
+#Default-View {
+  position:absolute;
+  left: 10px;
+  top: 90px;
+  padding: 10px 15px;
+  border: none;
+  border-radius: 5px;
+  font-size: 15px;
+  font-weight: 600;
+  color: white;
+  background-color: #006bff;
+  cursor: pointer;
+  z-index: 1000;
+}
+.my-format {
+  color: "black";
+}
+
+#myButtonvilla {
+  position: top right;
+  height: 40px;
+  color: black;
+  width: 120px;
+
+  background-color: lightgreen;
+  font-weight: bold;
+  font-size: 14px;
+  border: 10px;
+}
+.table-header {
+  color: blue;
+}
+
+.logostyle {
+  background-image: url("../pic/GMCS2.png");
+  background-position: left bottom;
+  width: 10px;
+  height: 10px;
+  background-size: cover;
+}
+
+/* villa style */
+.my_style_villa {
+  fill: white;
+  stroke: #002c69;
+  stroke-width: 0.5px;
+  fill-opacity: 1;
+  stroke-opacity: 1;
+  cursor: pointer;
+}
+.showTextonnotfoundvilla {
+  /* !important may be needed temporarily for debugging */
+  color:white !important;
+  
+}
+.showTextonvilla {
+  color: blue;
+  background-color: transparent;
+  font-weight: bold;
+  font-size: 8px;
+  border: transparent;
+  transform: scale(1);
+  height: 3px;
+}
+
+/* //blocks icon */
+
+.Not_villa_block {
+  fill: none;
+  stroke: gray;
+  stroke-width: 0.8;
+  opacity: 0.5;
+}
+.showblocknumText1,
+.showblocknumText2 {
+  color: yellblackow;
+  background-color: transparent;
+  font-weight: bold;
+  font-size: 8px;
+  border: transparent;
+  /* //more control in leaflet css line 585 */
+}
+
+.showblocknumText2 {
+  writing-mode: vertical-rl;
+  transform: rotate(-180deg);
+  color: black;
+}
+
+/* //notvilla or block style */
+.Not_villa {
+  fill: #232323;
+  stroke: black;
+  stroke-width: 2px;
+}
+#containeruplaodexcel {
+  max-width: 600px;
+  margin: auto;
+  background: white;
+  padding: 20px;
+  border-radius: 8px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+}
+
+
+
+
+
+
+
+
+
+
