@@ -113,22 +113,30 @@ export function computeVillaStatus(activityStatusMap = {}) {
 export async function getManyActivityStatuses(villaIDs) {
   const results = {};
   const chunkSize = 100; // DynamoDB BatchGetItem limit per table
+  const chunks = [];
   for (let i = 0; i < villaIDs.length; i += chunkSize) {
     const chunk = villaIDs.slice(i, i + chunkSize);
-    if (chunk.length === 0) continue;
-    try {
-      const result = await ddb.send(
-        new BatchGetCommand({
-          RequestItems: { [tables.actualDates]: { Keys: chunk.map((villaID) => ({ villaID })) } },
-        })
-      );
-      (result.Responses?.[tables.actualDates] ?? []).forEach((item) => {
-        const { villaID, ...statuses } = item;
-        results[villaID] = statuses;
-      });
-    } catch (err) {
-      explainIfMissingTable(err, tables.actualDates);
-    }
+    if (chunk.length > 0) chunks.push(chunk);
   }
+
+  // All chunks fire concurrently — see wideTableService.getManyVillaWideItems
+  // for why this matters (was 6 sequential round-trips for ~590 villas).
+  await Promise.all(
+    chunks.map(async (chunk) => {
+      try {
+        const result = await ddb.send(
+          new BatchGetCommand({
+            RequestItems: { [tables.actualDates]: { Keys: chunk.map((villaID) => ({ villaID })) } },
+          })
+        );
+        (result.Responses?.[tables.actualDates] ?? []).forEach((item) => {
+          const { villaID, ...statuses } = item;
+          results[villaID] = statuses;
+        });
+      } catch (err) {
+        explainIfMissingTable(err, tables.actualDates);
+      }
+    })
+  );
   return results;
 }

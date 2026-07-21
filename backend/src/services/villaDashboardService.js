@@ -2,52 +2,7 @@ import { tables } from "../config/aws.js";
 import { getVillaWideItem } from "./wideTableService.js";
 import { getAllActivityStatuses } from "./activityStatusService.js";
 import { constructionItems } from "../data/constructionItems.js";
-
-/**
- * FIRST-PASS ASSUMPTION about what a value looks like inside these wide
- * tables — I don't have a confirmed example of a real item from
- * plannedCostsTable/ActualCostsTable/plannedDatesTable/plannedDatesFinishTable,
- * only confirmation that they share Actual_dates' key shape (villaID only,
- * no sort key). I'm assuming each TableItemID's value is either a plain
- * number (for costs) / plain date string (for dates), or an object with a
- * reasonably-named field — these normalizers try both so a real value in
- * either shape will work. If your real values look different, these two
- * functions are the only things that need to change.
- */
-function toCostNumber(raw) {
-  if (typeof raw === "number") return raw;
-  if (raw && typeof raw === "object") {
-    const value = raw.cost ?? raw.amount ?? raw.value ?? 0;
-    return typeof value === "number" ? value : Number(value) || 0;
-  }
-  return Number(raw) || 0;
-}
-
-/**
- * Converts an Excel/Google Sheets serial date number (days since
- * 1899-12-30, with a fractional part for time-of-day — confirmed from a
- * real Planned_dates_Finish item: values like 45453.291666666) to an
- * ISO "YYYY-MM-DD" date string.
- */
-function excelSerialToISODate(serial) {
-  const utcDays = Math.floor(serial - 25569);
-  const utcMs = utcDays * 86400 * 1000;
-  return new Date(utcMs).toISOString().slice(0, 10);
-}
-
-function toDateString(raw) {
-  if (typeof raw === "number") return excelSerialToISODate(raw);
-  if (typeof raw === "string") {
-    const trimmed = raw.trim();
-    // Some rows may have the same Excel-serial number stored as a string.
-    if (trimmed !== "" && /^[0-9.]+$/.test(trimmed)) return excelSerialToISODate(Number(trimmed));
-    return trimmed || null;
-  }
-  if (raw && typeof raw === "object") {
-    return raw.date ?? raw.plannedStartDate ?? raw.plannedFinishDate ?? null;
-  }
-  return null;
-}
+import { toCostNumber, toDateString } from "../utils/costDateNormalizers.js";
 
 /**
  * Returns every construction item joined with this villa's planned/actual
@@ -78,4 +33,21 @@ export async function getVillaDashboardData(villaID) {
       actualCompletedDate: actual.completedDate ?? null,
     };
   });
+}
+
+/**
+ * Just the planned start/finish date for one construction item on one
+ * villa — used by the construction-item picker in the panel, which
+ * shouldn't need to pull the full 82-item dashboard join (and its cost
+ * data) just to show two dates.
+ */
+export async function getPlannedDatesForItem(villaID, tableItemId) {
+  const [plannedStartDates, plannedFinishDates] = await Promise.all([
+    getVillaWideItem(tables.plannedDates, villaID),
+    getVillaWideItem(tables.plannedDatesFinish, villaID),
+  ]);
+  return {
+    plannedStartDate: toDateString(plannedStartDates[tableItemId]),
+    plannedFinishDate: toDateString(plannedFinishDates[tableItemId]),
+  };
 }

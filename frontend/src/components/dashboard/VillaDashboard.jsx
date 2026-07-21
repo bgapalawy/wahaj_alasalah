@@ -13,7 +13,14 @@ import {
 import { Pie, Chart as MixedChart } from "react-chartjs-2";
 import * as XLSX from "xlsx";
 import { villasApi } from "../../api/villas.js";
-import { aggregateByPeriod, calculateDashboardMetrics, formatCurrency } from "../../utils/dashboardUtils.js";
+import {
+  aggregateByPeriod,
+  calculateDashboardMetrics,
+  formatCurrency,
+  formatPeriodLabel,
+  downloadChartAsImage,
+  getProjectDateRange,
+} from "../../utils/dashboardUtils.js";
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, ArcElement, Tooltip, Legend);
 
@@ -68,8 +75,13 @@ export function VillaDashboard({ villaID }) {
     [activities, viewType]
   );
 
+  const { earliestStart, latestFinish, firstActualDateRecorded, lastActualDateRecorded } = useMemo(
+    () => getProjectDateRange(activities),
+    [activities]
+  );
+
   const chartData = {
-    labels: sortedPeriods,
+    labels: sortedPeriods.map((p) => formatPeriodLabel(p, viewType)),
     datasets: [
       {
         type: "bar",
@@ -104,7 +116,7 @@ export function VillaDashboard({ villaID }) {
 
   function downloadExcel() {
     const rows = sortedPeriods.map((p) => ({
-      Period: p,
+      Period: formatPeriodLabel(p, viewType),
       "Planned Cost": periods[p].totalCost,
       "Actual Cost": periods[p].totalCostActual,
       "Planned Cumulative": periods[p].cumulativeCost,
@@ -119,12 +131,7 @@ export function VillaDashboard({ villaID }) {
   }
 
   function downloadChartImage() {
-    const canvas = chartRef.current?.canvas;
-    if (!canvas) return;
-    const link = document.createElement("a");
-    link.href = canvas.toDataURL("image/png");
-    link.download = `Villa_${villaID}_chart_${new Date().toISOString().slice(0, 10)}.png`;
-    link.click();
+    downloadChartAsImage(chartRef, `Villa_${villaID}_chart`);
   }
 
   if (status === "loading") return <p>Loading dashboard…</p>;
@@ -142,14 +149,73 @@ export function VillaDashboard({ villaID }) {
         </button>
       </div>
 
-      <div className="dashboard-summary-cards">
-        <div className="summary-card">
-          <span>Total Planned Cost</span>
-          <strong>{formatCurrency(metrics.grandTotal)}</strong>
+      <div>
+        <h4 style={{ fontSize: "0.85rem", color: "var(--color-text-muted)", margin: "0 0 0.5rem" }}>Timeline</h4>
+        <div className="dashboard-summary-cards">
+          <div className="summary-card">
+            <span>Planned Start Date</span>
+            <strong>{earliestStart ?? "—"}</strong>
+          </div>
+          <div className="summary-card">
+            <span>Planned Finish Date</span>
+            <strong>{latestFinish ?? "—"}</strong>
+          </div>
+          <div className="summary-card">
+            <span>First Actual Date Recorded</span>
+            <strong>{firstActualDateRecorded ?? "—"}</strong>
+          </div>
+          <div className="summary-card">
+            <span>Last Actual Date Recorded</span>
+            <strong>{lastActualDateRecorded ?? "—"}</strong>
+          </div>
         </div>
-        <div className="summary-card">
-          <span>Actual Cost To Date</span>
-          <strong>{formatCurrency(metrics.actualCostToDate)}</strong>
+      </div>
+
+      <div>
+        <h4 style={{ fontSize: "0.85rem", color: "var(--color-text-muted)", margin: "0 0 0.5rem" }}>
+          Total Budget — whole villa, any date
+        </h4>
+        <div className="dashboard-summary-cards">
+          <div className="summary-card">
+            <span>Total Planned Cost</span>
+            <strong>{formatCurrency(metrics.grandTotal)}</strong>
+          </div>
+          <div className="summary-card">
+            <span>Total Actual Cost</span>
+            <strong>{formatCurrency(metrics.totalActual)}</strong>
+          </div>
+          <div className="summary-card">
+            <span>Planned %</span>
+            <strong>{metrics.totalPlannedPercent.toFixed(1)}%</strong>
+          </div>
+          <div className="summary-card">
+            <span>Actual %</span>
+            <strong>{metrics.totalActualPercent.toFixed(1)}%</strong>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <h4 style={{ fontSize: "0.85rem", color: "var(--color-text-muted)", margin: "0 0 0.5rem" }}>
+          Up to {analysisDate} — date-adjusted
+        </h4>
+        <div className="dashboard-summary-cards">
+          <div className="summary-card">
+            <span>Planned Cost (to date)</span>
+            <strong>{formatCurrency(metrics.plannedCostToDate)}</strong>
+          </div>
+          <div className="summary-card">
+            <span>Actual Cost (to date)</span>
+            <strong>{formatCurrency(metrics.actualCostToDate)}</strong>
+          </div>
+          <div className="summary-card">
+            <span>Planned %</span>
+            <strong>{metrics.plannedPercent.toFixed(1)}%</strong>
+          </div>
+          <div className="summary-card">
+            <span>Actual %</span>
+            <strong>{metrics.actualPercent.toFixed(1)}%</strong>
+          </div>
         </div>
       </div>
 
@@ -201,7 +267,7 @@ export function VillaDashboard({ villaID }) {
           <tbody>
             {sortedPeriods.map((p) => (
               <tr key={p}>
-                <td>{p}</td>
+                <td>{formatPeriodLabel(p, viewType)}</td>
                 <td>{formatCurrency(periods[p].totalCost)}</td>
                 <td>{formatCurrency(periods[p].totalCostActual)}</td>
                 <td>{periods[p].cumPercent.toFixed(1)}%</td>

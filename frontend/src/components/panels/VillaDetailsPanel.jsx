@@ -3,6 +3,7 @@ import { villasApi } from "../../api/villas.js";
 import { constructionItemsApi } from "../../api/constructionItems.js";
 import { ConstructionItemSelect } from "./ConstructionItemSelect.jsx";
 import { ActivityStatusControl } from "./ActivityStatusControl.jsx";
+import { PlannedDatesDisplay } from "./PlannedDatesDisplay.jsx";
 import { FileStatusSection } from "./FileStatusSection.jsx";
 
 // vis-network is a large dependency — only load it once someone actually
@@ -99,6 +100,10 @@ export function VillaDetailsPanel({ villaID, onClose }) {
 
           <hr />
           <ConstructionItemSelect value={selectedItem} onChange={setSelectedItem} />
+
+          {selectedItem && (
+            <PlannedDatesDisplay villaID={villaID} tableItemId={selectedItem.TableItemID} />
+          )}
 
           {selectedItem && (
             <ActivityStatusControl

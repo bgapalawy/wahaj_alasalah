@@ -5,6 +5,7 @@ import {
 } from "@aws-sdk/lib-dynamodb";
 import { ddb, tables } from "../config/aws.js";
 import { computeVillaStatus, getAllActivityStatuses, getManyActivityStatuses } from "./activityStatusService.js";
+import { isValidVillaID } from "../utils/villaIdRange.js";
 
 /**
  * Wraps DynamoDB's ResourceNotFoundException with a message that actually
@@ -21,22 +22,52 @@ function explainIfMissingTable(err, tableName) {
 }
 
 /**
- * Returns every villa's attribute record from DynamoDB, with `status`
- * computed live from Actual_dates rather than returned as a stored field
- * (there isn't one to trust — see computeVillaStatus for the rule:
- * all activities Completed -> Completed, any activity started -> InProgress,
- * otherwise NotStarted).
+ * DynamoDB's Scan caps each response at ~1MB and sets LastEvaluatedKey if
+ * there's more data — a single ScanCommand silently drops the rest once a
+ * table gets big enough. This loops until LastEvaluatedKey is gone so the
+ * villas table is read in full regardless of size.
+ */
+async function scanEntireTable(tableName) {
+  const items = [];
+  let ExclusiveStartKey;
+  do {
+    const result = await ddb.send(new ScanCommand({ TableName: tableName, ExclusiveStartKey }));
+    items.push(...(result.Items ?? []));
+    ExclusiveStartKey = result.LastEvaluatedKey;
+  } while (ExclusiveStartKey);
+  return items;
+}
+
+/**
+ * Raw villa scan, filtered to the real V_1..V_590 range — no status
+ * attached. Exported separately from listVillas() so callers that are
+ * already about to batch-read Actual_dates for their own purposes (like
+ * the portfolio dashboard, which needs it for the records array anyway)
+ * can compute status from that same batch instead of listVillas() fetching
+ * it a second time.
+ */
+export async function scanValidVillas() {
+  try {
+    const allItems = await scanEntireTable(tables.villas);
+    return allItems.filter((v) => isValidVillaID(v.villaID));
+  } catch (err) {
+    explainIfMissingTable(err, tables.villas);
+  }
+}
+
+/**
+ * Returns every villa's attribute record from DynamoDB — filtered to the
+ * real V_1..V_590 range (see utils/villaIdRange.js), since these tables
+ * also contain test/enhancement rows (e.g. villaID "id") that aren't
+ * actual villas — with `status` computed live from Actual_dates rather
+ * than returned as a stored field (there isn't one to trust — see
+ * computeVillaStatus for the rule: all activities Completed -> Completed,
+ * any activity started -> InProgress, otherwise NotStarted).
  * Replaces the direct `dynamoDBClient.scan(...)` calls that used to live in
  * awsFunctions.js and run in the browser.
  */
 export async function listVillas() {
-  let villas;
-  try {
-    const result = await ddb.send(new ScanCommand({ TableName: tables.villas }));
-    villas = result.Items ?? [];
-  } catch (err) {
-    explainIfMissingTable(err, tables.villas);
-  }
+  const villas = await scanValidVillas();
 
   const villaIDs = villas.map((v) => v.villaID).filter(Boolean);
   let statusMap = {};

@@ -9,6 +9,8 @@ export const villasApi = {
     apiClient.get(`/villas/${villaID}/activities/${encodeURIComponent(tableItemId)}`),
   getAllActivityStatuses: (villaID) => apiClient.get(`/villas/${villaID}/activities`),
   getDashboard: (villaID) => apiClient.get(`/villas/${villaID}/dashboard`),
+  getPlannedDates: (villaID, tableItemId) =>
+    apiClient.get(`/villas/${villaID}/activities/${encodeURIComponent(tableItemId)}/planned-dates`),
   updateActivityStatus: (villaID, tableItemId, { status, completedDate }) =>
     apiClient.patch(`/villas/${villaID}/activities/${encodeURIComponent(tableItemId)}`, {
       status,

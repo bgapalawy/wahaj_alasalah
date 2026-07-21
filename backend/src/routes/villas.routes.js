@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { listVillas, getVillaById, updateVilla } from "../services/villaService.js";
 import { getActivityStatus, updateActivityStatus, getAllActivityStatuses } from "../services/activityStatusService.js";
-import { getVillaDashboardData } from "../services/villaDashboardService.js";
+import { getVillaDashboardData, getPlannedDatesForItem } from "../services/villaDashboardService.js";
 
 export const villasRouter = Router();
 
@@ -51,6 +51,17 @@ villasRouter.get("/:villaID/dashboard", async (req, res, next) => {
   try {
     const data = await getVillaDashboardData(req.params.villaID);
     res.json(data);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Just this item's planned start/finish date for this villa — used by the
+// construction-item picker, cheaper than the full dashboard join.
+villasRouter.get("/:villaID/activities/:tableItemId/planned-dates", async (req, res, next) => {
+  try {
+    const dates = await getPlannedDatesForItem(req.params.villaID, req.params.tableItemId);
+    res.json(dates);
   } catch (err) {
     next(err);
   }
