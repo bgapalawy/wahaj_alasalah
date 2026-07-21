@@ -1,9 +1,18 @@
 import { useEffect, useMemo, useRef } from "react";
-import { GeoJSON } from "react-leaflet";
-import { VILLA_STATUS_COLORS } from "../../config/mapConfig.js";
+import { GeoJSON, useMap } from "react-leaflet";
 import { ITEM_STATUS_COLORS } from "../../config/itemStatusColors.js";
 
 const NOT_VILLA_STYLE = { color: "#c7cbd1", weight: 0.5, fillColor: "#e5e7eb", fillOpacity: 0.12 };
+const NEUTRAL_VILLA_STYLE = { color: "#1f2937", weight: 1, fillColor: "#dbeafe", fillOpacity: 0.4 };
+const HIGHLIGHT_COLOR = "#ea580c"; // safety-orange accent, consistent with the rest of the app
+
+// A label only shows once its parcel is at least this big on screen —
+// checked against real pixel size rather than a flat zoom cutoff, since
+// parcel size varies a lot across the site and a single zoom threshold
+// either hides labels somewhere they'd fit, or shows them somewhere they
+// still overlap.
+const LABEL_MIN_WIDTH_PX = 45;
+const LABEL_MIN_HEIGHT_PX = 24;
 
 /**
  * Renders villa parcel polygons, colored one of two ways:
@@ -16,55 +25,68 @@ const NOT_VILLA_STYLE = { color: "#c7cbd1", weight: 0.5, fillColor: "#e5e7eb", f
  * areas, etc.) always render in a flat "off" style, are not clickable,
  * and are excluded from status counts/coloring regardless of any filter.
  *
+ * `highlightVillaIDs`, when provided, draws a bright outline on matching
+ * villas ON TOP of their normal fill color — a spotlight, not a filter.
+ * Used for "highlight this block/zone" without muting everything else.
+ *
  * Restyling uses Leaflet's imperative `setStyle()` on the existing layer
- * group instead of remounting the whole GeoJSON layer on every change.
- * The earlier version forced a remount via a changing `key` prop, which
- * meant every single multi-select checkbox click destroyed and rebuilt
- * ~600 polygon layers from scratch — cheap for the odd item-selection
- * change, but bad enough on rapid filter clicks to freeze the tab.
- * setStyle() just recolors the existing layers, no rebuild.
+ * group instead of remounting the whole GeoJSON layer on every change —
+ * a changing `key` prop used to force a full rebuild of ~600 layers on
+ * every single filter click, which was cheap for occasional changes but
+ * froze the tab under rapid multi-select clicking.
  */
 export function VillaLayer({
   geojson,
-  villaLookup = {},
   itemStatusLookup = null,
   filteredVillaIDs = null,
+  highlightVillaIDs = null,
   showLabels = true,
   onVillaClick,
 }) {
   const layerRef = useRef(null);
+  const map = useMap();
 
   const styleFn = useMemo(
     () => (feature) => {
       const villaID = feature.properties?.villaID;
       if (!villaID || villaID === "NOT_VILLA") return NOT_VILLA_STYLE;
 
+      const isHighlighted = highlightVillaIDs && highlightVillaIDs.has(villaID);
+
       // Villa is outside the active filter — render muted instead of
       // excluded, matching the original app's coloringvillas() treatment.
       if (itemStatusLookup && filteredVillaIDs && !filteredVillaIDs.has(villaID)) {
-        return { color: "#1f2937", weight: 1, fillColor: "#000000", fillOpacity: 0.3 };
-      }
-
-      if (itemStatusLookup) {
-        const itemStatus = itemStatusLookup[villaID] ?? "NotStarted";
         return {
-          color: "#1f2937",
-          weight: 1,
-          fillColor: ITEM_STATUS_COLORS[itemStatus] ?? ITEM_STATUS_COLORS.NotStarted,
-          fillOpacity: 0.75,
+          color: isHighlighted ? HIGHLIGHT_COLOR : "#1f2937",
+          weight: isHighlighted ? 3 : 1,
+          fillColor: "#000000",
+          fillOpacity: 0.3,
         };
       }
 
-      const villa = villaLookup[villaID];
-      const status = villa?.status ?? "NotStarted";
+      let base;
+      if (itemStatusLookup) {
+        const itemStatus = itemStatusLookup[villaID] ?? "NotStarted";
+        base = {
+          fillColor: ITEM_STATUS_COLORS[itemStatus] ?? ITEM_STATUS_COLORS.NotStarted,
+          fillOpacity: 0.75,
+        };
+      } else {
+        // No construction item selected — flat neutral color for every
+        // real villa instead of automatically rolling up overall status
+        // across all 82 activities. That roll-up is still available (see
+        // villaLookup/computeVillaStatus) but showing it unprompted read
+        // as "why are villas colored when I haven't picked anything."
+        base = NEUTRAL_VILLA_STYLE;
+      }
+
       return {
-        color: "#1f2937",
-        weight: 1,
-        fillColor: VILLA_STATUS_COLORS[status] ?? VILLA_STATUS_COLORS.NotStarted,
-        fillOpacity: 0.6,
+        ...base,
+        color: isHighlighted ? HIGHLIGHT_COLOR : "#1f2937",
+        weight: isHighlighted ? 3 : 1,
       };
     },
-    [villaLookup, itemStatusLookup, filteredVillaIDs]
+    [itemStatusLookup, filteredVillaIDs, highlightVillaIDs]
   );
 
   // Restyle in place whenever the style function changes, instead of
@@ -73,16 +95,50 @@ export function VillaLayer({
     layerRef.current?.setStyle(styleFn);
   }, [styleFn]);
 
-  // Show/hide the permanent villanum labels without touching the layers
-  // themselves — see the zoom-level note in MapView for why.
+  // Bring highlighted parcels to the front so their thick outline isn't
+  // hidden under a neighbor's border.
+  useEffect(() => {
+    if (!layerRef.current || !highlightVillaIDs) return;
+    layerRef.current.eachLayer((layer) => {
+      const villaID = layer.feature?.properties?.villaID;
+      if (villaID && highlightVillaIDs.has(villaID)) layer.bringToFront();
+    });
+  }, [highlightVillaIDs]);
+
+  // Show a villanum label only once its parcel is actually big enough on
+  // screen to read, recomputed on zoom/pan. Checked in real pixels, not a
+  // flat zoom cutoff, so it self-adapts across areas with very different
+  // parcel sizes instead of over- or under-showing labels site-wide.
   useEffect(() => {
     if (!layerRef.current) return;
-    layerRef.current.eachLayer((layer) => {
-      if (!layer.getTooltip?.()) return;
-      if (showLabels) layer.openTooltip();
-      else layer.closeTooltip();
-    });
-  }, [showLabels, geojson]);
+
+    function updateLabelVisibility() {
+      layerRef.current.eachLayer((layer) => {
+        if (!layer.getTooltip?.()) return;
+        if (!showLabels) {
+          layer.closeTooltip();
+          return;
+        }
+        const bounds = layer.getBounds?.();
+        if (!bounds || !bounds.isValid()) return;
+        const nw = map.latLngToContainerPoint(bounds.getNorthWest());
+        const se = map.latLngToContainerPoint(bounds.getSouthEast());
+        const widthPx = Math.abs(se.x - nw.x);
+        const heightPx = Math.abs(se.y - nw.y);
+        const bigEnough = widthPx >= LABEL_MIN_WIDTH_PX && heightPx >= LABEL_MIN_HEIGHT_PX;
+        if (bigEnough) layer.openTooltip();
+        else layer.closeTooltip();
+      });
+    }
+
+    updateLabelVisibility();
+    map.on("zoomend", updateLabelVisibility);
+    map.on("moveend", updateLabelVisibility);
+    return () => {
+      map.off("zoomend", updateLabelVisibility);
+      map.off("moveend", updateLabelVisibility);
+    };
+  }, [map, showLabels, geojson]);
 
   const onEachFeature = (feature, layer) => {
     const villaID = feature.properties?.villaID;

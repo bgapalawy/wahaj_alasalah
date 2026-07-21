@@ -119,6 +119,11 @@ button, input, select {
   letter-spacing: -0.02em;
 }
 
+.app-header-actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
 .header-dashboard-btn {
   padding: 0.45rem 1rem;
   border-radius: var(--radius-md);
@@ -129,6 +134,11 @@ button, input, select {
   font-size: 0.85rem;
   font-weight: 500;
   transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.header-dashboard-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .header-dashboard-btn:hover {
@@ -235,6 +245,8 @@ button, input, select {
   left: 4.5rem;
   z-index: 1000;
   width: 320px;
+  max-height: calc(100vh - 6rem);
+  overflow-y: auto;
   background: var(--color-surface);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-md);
@@ -248,6 +260,9 @@ button, input, select {
   font-size: 0.75rem;
   font-weight: 600;
   color: var(--color-text-muted);
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
   text-transform: uppercase;
   letter-spacing: 0.03em;
   margin-bottom: var(--space-2);
@@ -265,10 +280,67 @@ button, input, select {
   padding: 0;
 }
 
-.map-item-color-hint {
-  font-size: 0.75rem;
-  color: var(--color-text-faint);
-  margin: var(--space-1) 0 0;
+.map-item-color-header:active {
+  cursor: grabbing;
+}
+
+.map-item-color-header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.map-item-color-collapse-btn {
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--color-text-muted);
+  font-size: 0.7rem;
+  padding: 0.15rem 0.4rem;
+  border-radius: var(--radius-sm);
+}
+
+.map-item-color-collapse-btn:hover {
+  background: var(--color-surface-alt);
+}
+
+.map-highlight-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-border);
+  flex-wrap: wrap;
+}
+
+.map-highlight-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.map-highlight-row select {
+  padding: 0.3rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border-strong);
+  font-size: 0.78rem;
+}
+
+.map-boundary-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  font-size: 0.8rem;
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.map-boundary-toggle input {
+  accent-color: var(--color-primary);
 }
 
 .map-item-color-filters {
@@ -405,16 +477,68 @@ button, input, select {
   to { transform: rotate(360deg); }
 }
 
+.map-pan-control {
+  position: absolute;
+  bottom: var(--space-4);
+  left: var(--space-4);
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.map-pan-row {
+  display: flex;
+  gap: 2px;
+}
+
+.map-pan-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1.5px solid var(--color-primary);
+  background: var(--color-surface);
+  color: var(--color-primary);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--shadow-sm);
+}
+
+.map-pan-btn:hover {
+  background: var(--color-primary);
+  color: white;
+}
+
 .map-error {
   padding: var(--space-6);
   color: var(--color-danger);
+}
+
+.highlight-block-label span {
+  display: inline-block;
+  transform: translate(-50%, -50%);
+  background: rgba(234, 88, 12, 0.92);
+  color: white;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 13px;
+  padding: 0.3rem 0.7rem;
+  border-radius: var(--radius-pill);
+  white-space: nowrap;
+  box-shadow: var(--shadow-md);
+  pointer-events: none;
 }
 
 .villa-label-tooltip {
   background: transparent !important;
   border: none !important;
   box-shadow: none !important;
-  font-size: 9px !important;
+  font-size: 11px !important;
   font-weight: 700 !important;
   color: #1f2937 !important;
   padding: 0 !important;
@@ -1178,6 +1302,32 @@ button, input, select {
   font-size: 0.8rem;
   text-transform: none;
   font-weight: 400;
+}
+
+.multiselect-bulk-actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.multiselect-bulk-actions button {
+  flex: 1;
+  padding: 0.3rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-surface-alt);
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--color-primary);
+  cursor: pointer;
+}
+
+.multiselect-bulk-actions button:hover {
+  background: var(--color-primary-light);
 }
 
 .multiselect-option {

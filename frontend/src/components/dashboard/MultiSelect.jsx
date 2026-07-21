@@ -60,6 +60,17 @@ export function MultiSelect({ label, options, value, onChange }) {
               autoFocus
             />
           )}
+          <div className="multiselect-bulk-actions">
+            <button
+              type="button"
+              onClick={() => onChange([...new Set([...value, ...filteredOptions])])}
+            >
+              Select all
+            </button>
+            <button type="button" onClick={() => onChange([])}>
+              Clear all
+            </button>
+          </div>
           {filteredOptions.length === 0 && <div className="multiselect-empty">No matches</div>}
           {filteredOptions.map((option) => (
             <label key={option} className="multiselect-option">

@@ -12,6 +12,12 @@ export const MAP_DEFAULTS = {
 
 export const GEOJSON_URL = "/data/villa-parcels.geojson";
 
+// Place your outer project boundary GeoJSON at this path
+// (frontend/public/data/project-boundary.geojson) to enable the map's
+// "Show project boundary" toggle. Optional — the toggle just won't do
+// anything useful until the file exists.
+export const BOUNDARY_GEOJSON_URL = "/data/project-boundary.geojson";
+
 // Colors for the parcel map, keyed by the *computed* villa-level status
 // (see backend computeVillaStatus): NotStarted / InProgress / Completed.
 export const VILLA_STATUS_COLORS = {
