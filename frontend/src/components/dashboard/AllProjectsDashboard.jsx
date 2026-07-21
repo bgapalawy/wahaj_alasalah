@@ -19,6 +19,7 @@ import { VILLA_STATUS_COLORS } from "../../config/mapConfig.js";
 import { CATEGORY_COLOR_PALETTE } from "../../utils/graphUtils.js";
 import { FilterBar } from "./FilterBar.jsx";
 import { Tabs } from "./Tabs.jsx";
+import { ConstructionItemDashboard } from "./ConstructionItemDashboard.jsx";
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, ArcElement, Tooltip, Legend);
 
@@ -640,6 +641,11 @@ export function AllProjectsDashboard() {
                 </table>
               </div>
             ),
+          },
+          {
+            id: "by-item",
+            label: "By Item",
+            content: <ConstructionItemDashboard />,
           },
           {
             id: "data",

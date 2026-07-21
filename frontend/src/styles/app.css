@@ -229,9 +229,201 @@ button, input, select {
   color: var(--color-danger);
 }
 
+.map-item-color-control {
+  position: absolute;
+  top: var(--space-4);
+  left: 4.5rem;
+  z-index: 1000;
+  width: 320px;
+  background: var(--color-surface);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  padding: var(--space-3);
+}
+
+.map-item-color-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-bottom: var(--space-2);
+}
+
+.map-item-color-clear {
+  border: none;
+  background: none;
+  color: var(--color-primary);
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-transform: none;
+  letter-spacing: normal;
+  padding: 0;
+}
+
+.map-item-color-hint {
+  font-size: 0.75rem;
+  color: var(--color-text-faint);
+  margin: var(--space-1) 0 0;
+}
+
+.map-item-color-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.map-item-color-filter-field {
+  flex: 1;
+  min-width: 80px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.map-item-color-filter-field select {
+  padding: 0.3rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border-strong);
+  font-size: 0.78rem;
+  font-weight: 400;
+  text-transform: none;
+}
+
+.map-item-color-count {
+  margin-left: auto;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+.map-item-color-percent {
+  font-weight: 400;
+  color: var(--color-text-faint);
+}
+
+.map-item-color-legend-with-chart {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.map-item-color-legend-rows {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.status-donut {
+  flex-shrink: 0;
+  width: 70px;
+  height: 70px;
+  border-radius: 50%;
+  position: relative;
+}
+
+.status-donut-hole {
+  position: absolute;
+  inset: 14px;
+  border-radius: 50%;
+  background: var(--color-surface);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.65rem;
+  color: var(--color-text-muted);
+}
+
+.status-donut-hole strong {
+  font-size: 0.85rem;
+  color: var(--color-text);
+  font-family: var(--font-display);
+}
+
+.status-donut-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-surface-sunken);
+  font-size: 0.65rem;
+  color: var(--color-text-faint);
+}
+
+.map-item-color-legend {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-border);
+}
+
+.map-item-color-legend-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 0.75rem;
+  color: var(--color-text);
+}
+
+.map-item-color-legend-row .legend-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  border: 1px solid var(--color-border-strong);
+}
+
+.loading-ring-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.loading-ring {
+  animation: loading-ring-spin 0.8s linear infinite;
+}
+
+.loading-ring-label {
+  font-size: 0.75rem;
+  color: var(--color-text-faint);
+}
+
+@keyframes loading-ring-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 .map-error {
   padding: var(--space-6);
   color: var(--color-danger);
+}
+
+.villa-label-tooltip {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  font-size: 9px !important;
+  font-weight: 700 !important;
+  color: #1f2937 !important;
+  padding: 0 !important;
+  text-shadow: 0 0 2px white, 0 0 2px white, 0 0 2px white;
+  pointer-events: none;
+}
+
+.villa-label-tooltip::before {
+  display: none !important;
 }
 
 /* ============================================================
@@ -275,6 +467,10 @@ button, input, select {
   font-size: 0.8rem;
   color: var(--color-text-muted);
   margin: 0 0 var(--space-2);
+}
+
+.planned-dates-display p {
+  margin: 0 0 0.2rem;
 }
 
 .planned-dates-display strong {

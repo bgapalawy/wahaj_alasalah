@@ -36,18 +36,22 @@ export async function getVillaDashboardData(villaID) {
 }
 
 /**
- * Just the planned start/finish date for one construction item on one
- * villa — used by the construction-item picker in the panel, which
- * shouldn't need to pull the full 82-item dashboard join (and its cost
- * data) just to show two dates.
+ * Planned/actual cost + planned start/finish date for one construction
+ * item on one villa — used by the construction-item picker in the panel.
+ * Lighter than the full 82-item dashboard join since it only reads the
+ * one item this villa's panel actually needs.
  */
 export async function getPlannedDatesForItem(villaID, tableItemId) {
-  const [plannedStartDates, plannedFinishDates] = await Promise.all([
+  const [plannedStartDates, plannedFinishDates, plannedCosts, actualCosts] = await Promise.all([
     getVillaWideItem(tables.plannedDates, villaID),
     getVillaWideItem(tables.plannedDatesFinish, villaID),
+    getVillaWideItem(tables.plannedCosts, villaID),
+    getVillaWideItem(tables.actualCosts, villaID),
   ]);
   return {
     plannedStartDate: toDateString(plannedStartDates[tableItemId]),
     plannedFinishDate: toDateString(plannedFinishDates[tableItemId]),
+    plannedCost: toCostNumber(plannedCosts[tableItemId]),
+    actualCost: toCostNumber(actualCosts[tableItemId]),
   };
 }

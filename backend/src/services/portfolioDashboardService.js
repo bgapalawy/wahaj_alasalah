@@ -37,13 +37,14 @@ export async function getAllProjectsDashboardData() {
   const villas = await scanValidVillas();
   const villaIDs = villas.map((v) => v.villaID).filter(Boolean);
 
-  const [plannedCostsByVilla, actualCostsByVilla, plannedStartByVilla, plannedFinishByVilla, actualStatusByVilla] =
+  const [plannedCostsByVilla, actualCostsByVilla, plannedStartByVilla, plannedFinishByVilla, statusByVilla, dateByVilla] =
     await Promise.all([
       getManyVillaWideItems(tables.plannedCosts, villaIDs),
       getManyVillaWideItems(tables.actualCosts, villaIDs),
       getManyVillaWideItems(tables.plannedDates, villaIDs),
       getManyVillaWideItems(tables.plannedDatesFinish, villaIDs),
-      getManyVillaWideItems(tables.actualDates, villaIDs),
+      getManyVillaWideItems(tables.wajhaData, villaIDs), // real status, plain strings
+      getManyVillaWideItems(tables.actualDates, villaIDs), // completedDate only now
     ]);
 
   const categoryTotals = {}; // { Civil: { planned, actual }, ... }
@@ -54,20 +55,24 @@ export async function getAllProjectsDashboardData() {
     const actualItem = actualCostsByVilla[villa.villaID] ?? {};
     const plannedStartItem = plannedStartByVilla[villa.villaID] ?? {};
     const plannedFinishItem = plannedFinishByVilla[villa.villaID] ?? {};
-    const actualStatusItem = actualStatusByVilla[villa.villaID] ?? {};
+    const statusItem = statusByVilla[villa.villaID] ?? {};
+    const dateItem = dateByVilla[villa.villaID] ?? {};
 
     let plannedCost = 0;
     let actualCost = 0;
+    const statusMapForVilla = {};
 
     constructionItems.forEach((item) => {
       const id = item.TableItemID;
       const category = getCategory(id);
       const planned = toCostNumber(plannedItem[id]);
       const actual = toCostNumber(actualItem[id]);
-      const actualEntry = actualStatusItem[id] ?? {};
+      const actualStatus = statusItem[id] ?? "NotStarted";
+      const actualCompletedDate = dateItem[id]?.completedDate ?? null;
 
       plannedCost += planned;
       actualCost += actual;
+      statusMapForVilla[id] = { status: actualStatus };
 
       if (!categoryTotals[category]) categoryTotals[category] = { planned: 0, actual: 0 };
       categoryTotals[category].planned += planned;
@@ -84,15 +89,15 @@ export async function getAllProjectsDashboardData() {
         actualCost: actual,
         plannedStartDate: toDateString(plannedStartItem[id]),
         plannedFinishDate: toDateString(plannedFinishItem[id]),
-        actualStatus: actualEntry.status ?? "NotStarted",
-        actualCompletedDate: actualEntry.completedDate ?? null,
+        actualStatus,
+        actualCompletedDate,
       });
     });
 
     return {
       villaID: villa.villaID,
       blocknum: villa.blocknum ?? null,
-      status: computeVillaStatus(actualStatusItem),
+      status: computeVillaStatus(statusMapForVilla),
       plannedCost,
       actualCost,
       percentComplete: plannedCost > 0 ? (actualCost / plannedCost) * 100 : 0,

@@ -11,6 +11,10 @@ const AllProjectsDashboard = lazy(() =>
 export default function App() {
   const [selectedVillaID, setSelectedVillaID] = useState(null);
   const [showProjectDashboard, setShowProjectDashboard] = useState(false);
+  // Lifted up from MapView so the villa panel can pre-select the same
+  // construction item you're currently coloring the map by — no more
+  // reselecting it every time you click a villa.
+  const [colorByItem, setColorByItem] = useState(null);
 
   return (
     <div className="app-shell">
@@ -21,10 +25,11 @@ export default function App() {
         </button>
       </header>
       <main className="app-main">
-        <MapView onVillaClick={setSelectedVillaID} />
+        <MapView onVillaClick={setSelectedVillaID} colorByItem={colorByItem} onColorByItemChange={setColorByItem} />
         <VillaDetailsPanel
           villaID={selectedVillaID}
           onClose={() => setSelectedVillaID(null)}
+          initialConstructionItem={colorByItem}
         />
       </main>
 

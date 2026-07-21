@@ -21,10 +21,10 @@ const VillaDashboard = lazy(() =>
  * construction-item picker, the file-status upload section, and (new) an
  * expandable dependency graph replacing the old right-click popup.
  */
-export function VillaDetailsPanel({ villaID, onClose }) {
+export function VillaDetailsPanel({ villaID, onClose, initialConstructionItem = null }) {
   const [villa, setVilla] = useState(null);
   const [status, setStatus] = useState("idle");
-  const [selectedItem, setSelectedItem] = useState(null);
+  const [selectedItem, setSelectedItem] = useState(initialConstructionItem);
   const [showGraph, setShowGraph] = useState(false);
   const [showDashboard, setShowDashboard] = useState(false);
   const [allActivities, setAllActivities] = useState([]);
@@ -33,7 +33,10 @@ export function VillaDetailsPanel({ villaID, onClose }) {
   useEffect(() => {
     if (!villaID) return;
     setStatus("loading");
-    setSelectedItem(null);
+    // Pre-select whatever item the map is currently colored by, instead
+    // of always resetting to nothing — you were already looking at that
+    // item's status across the whole site, no reason to lose it on click.
+    setSelectedItem(initialConstructionItem);
     setShowGraph(false);
     setShowDashboard(false);
     villasApi
@@ -48,6 +51,7 @@ export function VillaDetailsPanel({ villaID, onClose }) {
       .getAllActivityStatuses(villaID)
       .then(setLiveStatusMap)
       .catch(() => setLiveStatusMap({}));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [villaID]);
 
   useEffect(() => {

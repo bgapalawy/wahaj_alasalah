@@ -21,6 +21,13 @@ export const tables = {
   actualDates: process.env.DDB_ACTUAL_DATES_TABLE,
   plannedDatesFinish: process.env.DDB_PLANNED_DATES_FINISH_TABLE,
   specialQuery: process.env.DDB_SPECIAL_QUERY_TABLE,
+  // The REAL, original per-villa/per-item status source (confirmed against
+  // your AWS console) — plain string values like "Completed"/"NotStarted"
+  // directly on each TableItemID column, not the nested {status,
+  // completedDate} shape Actual_dates uses. Actual_dates is still used for
+  // completedDate tracking; wajhaData is now the source of truth for
+  // *current status* everywhere (villa status, map coloring, dashboards).
+  wajhaData: process.env.DDB_WAJHA_DATA_TABLE,
 };
 
 export const s3Bucket = process.env.S3_BUCKET_NAME;

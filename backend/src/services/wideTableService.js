@@ -35,6 +35,18 @@ export async function getVillaWideItem(tableName, villaID) {
  * independent request, so there's no reason to await them one at a time.
  * With ~590 villas that's 6 chunks; sequential, that was 6 round-trips of
  * latency for every single table read. In parallel, it's 1.
+ *
+ * NOTE: this used to accept a `projectionKey` to fetch only one attribute
+ * via DynamoDB's ProjectionExpression instead of the whole ~82-field wide
+ * item. I never actually verified that syntax against live DynamoDB (this
+ * sandbox has no AWS access — "route reachable" checks never exercised
+ * the real query), and it turned out to silently return no data at all
+ * for every villa. Reverted to always fetching the full item, which is
+ * the version that's actually been confirmed correct against your real
+ * data (portfolio dashboard's cost totals matched your hand calculations).
+ * If this needs to be fast again later, that projection logic should be
+ * built and tested against a real DynamoDB table before shipping, not
+ * guessed at blind a second time.
  */
 export async function getManyVillaWideItems(tableName, villaIDs) {
   const results = {};
