@@ -5,6 +5,7 @@ import { ConstructionItemSelect } from "./ConstructionItemSelect.jsx";
 import { ActivityStatusControl } from "./ActivityStatusControl.jsx";
 import { PlannedDatesDisplay } from "./PlannedDatesDisplay.jsx";
 import { FileStatusSection } from "./FileStatusSection.jsx";
+import { useVillaGeoMeta } from "../../hooks/useVillaGeoMeta.js";
 
 // vis-network is a large dependency — only load it once someone actually
 // opens the dependency graph, instead of on every page view.
@@ -29,6 +30,7 @@ export function VillaDetailsPanel({ villaID, onClose, initialConstructionItem = 
   const [showDashboard, setShowDashboard] = useState(false);
   const [allActivities, setAllActivities] = useState([]);
   const [liveStatusMap, setLiveStatusMap] = useState({});
+  const { villaMetaByID } = useVillaGeoMeta();
 
   useEffect(() => {
     if (!villaID) return;
@@ -79,7 +81,9 @@ export function VillaDetailsPanel({ villaID, onClose, initialConstructionItem = 
       {status === "success" && villa && (
         <>
           <h2>Villa {villa.villaID}</h2>
-          <p>Block: {villa.blocknum ?? "—"}</p>
+          <p>Zone: {villaMetaByID[villa.villaID]?.zonenum ?? "—"}</p>
+          <p>Block: {villaMetaByID[villa.villaID]?.blocknum ?? "—"}</p>
+          <p>Villa Type: {villaMetaByID[villa.villaID]?.villatype ?? "—"}</p>
           <p>Status: {villa.status ?? "NotStarted"}</p>
 
           <button type="button" className="graph-toggle-btn" onClick={() => setShowDashboard((v) => !v)}>

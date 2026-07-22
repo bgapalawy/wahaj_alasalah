@@ -18,8 +18,85 @@ import { aggregateByCategory, aggregateTotalBudget, getTopItems, getFilteredDate
 import { VILLA_STATUS_COLORS } from "../../config/mapConfig.js";
 import { CATEGORY_COLOR_PALETTE } from "../../utils/graphUtils.js";
 import { FilterBar } from "./FilterBar.jsx";
+
+// Draws the percent value directly on each pie slice — applied to the
+// Category Planned/Actual pies so their downloaded PNGs are readable on
+// their own, without needing the on-screen legend/tooltips. A small
+// custom Chart.js plugin rather than a new npm dependency.
+// Percent-only label drawn on each pie slice — used for the Category
+// Planned/Actual pies. (An earlier version also drew the SAR value here,
+// but it overlapped badly with the percent text on smaller slices —
+// moved the cost value into the legend instead, see legendWithValues.)
+const percentLabelsPlugin = {
+  id: "percentLabels",
+  afterDatasetsDraw(chart) {
+    const dataset = chart.data.datasets[0];
+    if (!dataset) return;
+    const meta = chart.getDatasetMeta(0);
+    const total = dataset.data.reduce((sum, v) => sum + (v || 0), 0);
+    if (total <= 0) return;
+    const { ctx } = chart;
+    ctx.save();
+    ctx.font = "bold 12px sans-serif";
+    ctx.fillStyle = "#1f2937";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    meta.data.forEach((arc, i) => {
+      const value = dataset.data[i];
+      if (!value) return;
+      const percent = (value / total) * 100;
+      if (percent < 3) return; // skip slivers too small for the label to be readable anyway
+      const pos = arc.tooltipPosition();
+      ctx.fillText(`${percent.toFixed(0)}%`, pos.x, pos.y);
+    });
+    ctx.restore();
+  },
+};
+
+// Raw count drawn on each slice — used for the Villas by Status pie,
+// where a percent alone doesn't tell you how many actual villas that is.
+const countLabelsPlugin = {
+  id: "countLabels",
+  afterDatasetsDraw(chart) {
+    const dataset = chart.data.datasets[0];
+    if (!dataset) return;
+    const meta = chart.getDatasetMeta(0);
+    const total = dataset.data.reduce((sum, v) => sum + (v || 0), 0);
+    if (total <= 0) return;
+    const { ctx } = chart;
+    ctx.save();
+    ctx.font = "bold 13px sans-serif";
+    ctx.fillStyle = "#1f2937";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    meta.data.forEach((arc, i) => {
+      const value = dataset.data[i];
+      if (!value) return;
+      const pos = arc.tooltipPosition();
+      ctx.fillText(String(value), pos.x, pos.y);
+    });
+    ctx.restore();
+  },
+};
+
+// Legend entries with the cost value appended to each category name,
+// e.g. "Architectural: 106.6M SAR" — moved here from on-slice labels
+// (see percentLabelsPlugin) since the slice was getting cramped.
+function legendWithValues(chart) {
+  const { data } = chart;
+  if (!data.labels?.length || !data.datasets?.length) return [];
+  const dataset = data.datasets[0];
+  return data.labels.map((label, i) => ({
+    text: `${label}: ${formatSAR(dataset.data[i])}`,
+    fillStyle: dataset.backgroundColor[i],
+    strokeStyle: dataset.backgroundColor[i],
+    hidden: false,
+    index: i,
+  }));
+}
 import { Tabs } from "./Tabs.jsx";
 import { ConstructionItemDashboard } from "./ConstructionItemDashboard.jsx";
+import { useVillaGeoMeta } from "../../hooks/useVillaGeoMeta.js";
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, ArcElement, Tooltip, Legend);
 
@@ -58,6 +135,7 @@ export function AllProjectsDashboard() {
   const [sortDir, setSortDir] = useState("asc");
   const [page, setPage] = useState(1);
   const [tableSearch, setTableSearch] = useState("");
+  const { villaMetaByID } = useVillaGeoMeta();
 
   const categoryPlannedRef = useRef(null);
   const categoryActualRef = useRef(null);
@@ -77,22 +155,88 @@ export function AllProjectsDashboard() {
         const maxDate = finishDates.length
           ? finishDates.reduce((max, d) => (d > max ? d : max))
           : new Date().toISOString().slice(0, 10);
-        setFilters({ startDate: minDate, endDate: maxDate, categories: [], items: [], villas: [], blocks: [], stages: [] });
+        setFilters({
+          startDate: minDate,
+          endDate: maxDate,
+          categories: [],
+          items: [],
+          villas: [],
+          blocks: [],
+          zones: [],
+          villaTypes: [],
+        });
       })
       .catch(() => setStatus("error"));
   }, []);
 
+  // Every real villa in the GeoJSON (~1,540), not just the ~590 the
+  // backend currently has cost/status data for. Records for villas the
+  // backend already knows about get zonenum/villatype merged in from the
+  // GeoJSON; villas missing from the backend entirely get one synthesized
+  // zero-cost/NotStarted row per construction item, using the first known
+  // villa's records as a template for the 82 items' category/item/TableItemID.
+  const enrichedRecords = useMemo(() => {
+    if (!data) return [];
+
+    const withGeoMeta = data.records.map((r) => ({
+      ...r,
+      // blocknum from the backend is sourced from the DynamoDB villas
+      // table, which is mostly null (confirmed much earlier) — the
+      // GeoJSON's blocknum is the real one, same source the map's Block
+      // filter already uses. Without this override, only the synthesized
+      // (missing-from-backend) villas got a real block, so most blocks
+      // were massively under-represented in the filter's option list.
+      blocknum: villaMetaByID[r.villaID]?.blocknum ?? r.blocknum ?? null,
+      zonenum: villaMetaByID[r.villaID]?.zonenum ?? null,
+      villatype: villaMetaByID[r.villaID]?.villatype ?? null,
+    }));
+
+    const knownVillaIDs = new Set(data.villas.map((v) => v.villaID));
+    const missingVillaIDs = Object.keys(villaMetaByID).filter((id) => !knownVillaIDs.has(id));
+    if (missingVillaIDs.length === 0) return withGeoMeta;
+
+    const firstKnownVillaID = data.records[0]?.villaID;
+    const itemTemplate = firstKnownVillaID
+      ? data.records
+          .filter((r) => r.villaID === firstKnownVillaID)
+          .map((r) => ({ category: r.category, item: r.item, TableItemID: r.TableItemID }))
+      : [];
+
+    const synthesized = missingVillaIDs.flatMap((villaID) => {
+      const meta = villaMetaByID[villaID] ?? {};
+      return itemTemplate.map((t) => ({
+        villaID,
+        blocknum: meta.blocknum ?? null,
+        stage: null,
+        zonenum: meta.zonenum ?? null,
+        villatype: meta.villatype ?? null,
+        category: t.category,
+        item: t.item,
+        TableItemID: t.TableItemID,
+        plannedCost: 0,
+        actualCost: 0,
+        plannedStartDate: null,
+        plannedFinishDate: null,
+        actualStatus: "NotStarted",
+        actualCompletedDate: null,
+      }));
+    });
+
+    return [...withGeoMeta, ...synthesized];
+  }, [data, villaMetaByID]);
+
   const filteredRecords = useMemo(() => {
     if (!data || !filters) return [];
-    return data.records.filter((r) => {
+    return enrichedRecords.filter((r) => {
       if (filters.categories.length > 0 && !filters.categories.includes(r.category)) return false;
       if (filters.items.length > 0 && !filters.items.includes(r.item)) return false;
       if (filters.villas.length > 0 && !filters.villas.includes(r.villaID)) return false;
       if (filters.blocks.length > 0 && !filters.blocks.includes(r.blocknum)) return false;
-      if (filters.stages.length > 0 && !filters.stages.includes(r.stage)) return false;
+      if (filters.zones && filters.zones.length > 0 && !filters.zones.includes(r.zonenum)) return false;
+      if (filters.villaTypes && filters.villaTypes.length > 0 && !filters.villaTypes.includes(r.villatype)) return false;
       return true;
     });
-  }, [data, filters]);
+  }, [data, filters, enrichedRecords]);
 
   const rangeEndDate = filters ? new Date(`${filters.endDate}T00:00:00`) : new Date();
 
@@ -108,6 +252,25 @@ export function AllProjectsDashboard() {
   const totalBudgetBreakdown = useMemo(() => aggregateTotalBudget(filteredRecords), [filteredRecords]);
 
   const dateSummary = useMemo(() => getFilteredDateSummary(filteredRecords), [filteredRecords]);
+
+  // Elapsed = (selected date - planned start) / (planned finish - planned
+  // start), using the filtered scope's own earliest start / latest finish
+  // as the project window, and the FilterBar's end date as "the day
+  // selected." Clamped to [0, 100]% / [0, totalDays] since a date outside
+  // the project window (before start or after finish) shouldn't report a
+  // negative or >100% elapsed figure.
+  const elapsedDuration = useMemo(() => {
+    if (!filters || !dateSummary.earliestPlannedStart || !dateSummary.latestPlannedFinish) return null;
+    const start = new Date(`${dateSummary.earliestPlannedStart}T00:00:00`);
+    const finish = new Date(`${dateSummary.latestPlannedFinish}T00:00:00`);
+    const selected = new Date(`${filters.endDate}T00:00:00`);
+    const totalDays = (finish - start) / (1000 * 60 * 60 * 24);
+    if (totalDays <= 0) return null;
+    const rawElapsedDays = (selected - start) / (1000 * 60 * 60 * 24);
+    const elapsedDays = Math.max(0, Math.min(totalDays, rawElapsedDays));
+    const elapsedPercent = (elapsedDays / totalDays) * 100;
+    return { elapsedDays: Math.round(elapsedDays), totalDays: Math.round(totalDays), elapsedPercent };
+  }, [filters, dateSummary]);
 
   const topItems = useMemo(() => getTopItems(filteredRecords, rangeEndDate, 10), [filteredRecords, filters?.endDate]);
 
@@ -150,7 +313,8 @@ export function AllProjectsDashboard() {
     return rows.map((r) => ({
       Villa: r.villaID,
       Block: r.blocknum ?? "—",
-      Stage: r.stage ?? "—",
+      Zone: r.zonenum ?? "—",
+      "Villa Type": r.villatype ?? "—",
       Item: r.item,
       Category: r.category,
       "Planned Cost": r.plannedCost,
@@ -164,7 +328,26 @@ export function AllProjectsDashboard() {
   if (status === "loading" || !filters) return <p>Loading project dashboard…</p>;
   if (status === "error") return <p>Couldn't load the project dashboard.</p>;
 
-  const { statusCounts } = data;
+  // Rolled up client-side from filteredRecords (all real GeoJSON villas,
+  // not just the backend's ~590) instead of the backend's raw
+  // data.statusCounts, which only ever covered the villas it has cost
+  // data for. Same rule as the backend's computeVillaStatus: every item
+  // Completed -> Completed, any item started -> InProgress, else NotStarted.
+  const statusCounts = (() => {
+    const byVilla = {};
+    filteredRecords.forEach((r) => {
+      if (!byVilla[r.villaID]) byVilla[r.villaID] = [];
+      byVilla[r.villaID].push(r.actualStatus ?? "NotStarted");
+    });
+    const counts = { NotStarted: 0, InProgress: 0, Completed: 0 };
+    Object.values(byVilla).forEach((statuses) => {
+      const allCompleted = statuses.every((s) => s === "Completed");
+      const anyStarted = statuses.some((s) => s !== "NotStarted");
+      const villaStatus = allCompleted ? "Completed" : anyStarted ? "InProgress" : "NotStarted";
+      counts[villaStatus] = (counts[villaStatus] ?? 0) + 1;
+    });
+    return counts;
+  })();
   const totalPlannedFiltered = categoryBreakdown.plannedCosts.reduce((s, c) => s + c, 0);
   const totalActualFiltered = categoryBreakdown.actualCosts.reduce((s, c) => s + c, 0);
 
@@ -187,26 +370,46 @@ export function AllProjectsDashboard() {
     percent: statusTotal > 0 ? ((statusCounts[s] ?? 0) / statusTotal) * 100 : 0,
   }));
 
-  const categoryTableRows = categoryBreakdown.categories.map((category, i) => ({
-    category,
-    plannedCost: categoryBreakdown.plannedCosts[i],
-    actualCost: categoryBreakdown.actualCosts[i],
-    // Both percentages use the SAME denominator — total planned budget —
-    // so they're directly comparable apples-to-apples on one row: "what
-    // share of the whole project's planned budget does this category's
-    // planned cost represent, and what share does its actual cost
-    // represent." (Two earlier attempts got this wrong: first using two
-    // different denominators for planned vs actual, which made actual %
-    // look inconsistent with actual cost; then switching to a per-category
-    // actual/planned ratio, which wasn't the metric being asked for.)
-    plannedPercent: totalPlannedFiltered > 0 ? (categoryBreakdown.plannedCosts[i] / totalPlannedFiltered) * 100 : 0,
-    actualPercent: totalPlannedFiltered > 0 ? (categoryBreakdown.actualCosts[i] / totalPlannedFiltered) * 100 : 0,
-  }));
+  // Every category row now carries BOTH the Total (whole filtered scope,
+  // any date) and the Up-to-date (date-adjusted) figures side by side,
+  // matching the same Total/Up-to-date split already used for the
+  // summary cards above. Plain calculation, not useMemo — this runs after
+  // the loading/error early return above, so wrapping it in a hook here
+  // would call that hook conditionally and violate the Rules of Hooks
+  // (this is exactly what caused the "Rendered more hooks than during the
+  // previous render" crash).
+  const categoryTableRows = (() => {
+    const allCategories = [
+      ...new Set([...totalBudgetBreakdown.categories, ...categoryBreakdown.categories]),
+    ].sort();
+    return allCategories.map((category) => {
+      const totalIdx = totalBudgetBreakdown.categories.indexOf(category);
+      const toDateIdx = categoryBreakdown.categories.indexOf(category);
+      const totalPlanned = totalIdx >= 0 ? totalBudgetBreakdown.plannedCosts[totalIdx] : 0;
+      const totalActual = totalIdx >= 0 ? totalBudgetBreakdown.actualCosts[totalIdx] : 0;
+      const toDatePlanned = toDateIdx >= 0 ? categoryBreakdown.plannedCosts[toDateIdx] : 0;
+      const toDateActual = toDateIdx >= 0 ? categoryBreakdown.actualCosts[toDateIdx] : 0;
+      return {
+        category,
+        totalPlanned,
+        totalActual,
+        // Same convention as the summary cards: every percent divides by
+        // the same denominator (total planned budget) so all four numbers
+        // are directly comparable on one row.
+        totalPlannedPercent: totalBudgetPlanned > 0 ? (totalPlanned / totalBudgetPlanned) * 100 : 0,
+        totalActualPercent: totalBudgetPlanned > 0 ? (totalActual / totalBudgetPlanned) * 100 : 0,
+        toDatePlanned,
+        toDateActual,
+        toDatePlannedPercent: totalBudgetPlanned > 0 ? (toDatePlanned / totalBudgetPlanned) * 100 : 0,
+        toDateActualPercent: totalBudgetPlanned > 0 ? (toDateActual / totalBudgetPlanned) * 100 : 0,
+      };
+    });
+  })();
 
   return (
     <div className="villa-dashboard">
       <FilterBar
-        records={data.records}
+        records={enrichedRecords}
         minDate={filters.startDate}
         maxDate={filters.endDate}
         onApply={(f) => {
@@ -252,6 +455,26 @@ export function AllProjectsDashboard() {
                     </div>
                   </div>
                 </div>
+
+                {elapsedDuration && (
+                  <div>
+                    <h4 style={{ fontSize: "0.85rem", color: "var(--color-text-muted)", margin: "0 0 0.5rem" }}>
+                      Elapsed Duration — as of {filters.endDate}
+                    </h4>
+                    <div className="dashboard-summary-cards">
+                      <div className="summary-card">
+                        <span>Elapsed Days</span>
+                        <strong>
+                          {elapsedDuration.elapsedDays} / {elapsedDuration.totalDays}
+                        </strong>
+                      </div>
+                      <div className="summary-card">
+                        <span>Elapsed %</span>
+                        <strong>{elapsedDuration.elapsedPercent.toFixed(1)}%</strong>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 <div>
                   <h4 style={{ fontSize: "0.85rem", color: "var(--color-text-muted)", margin: "0 0 0.5rem" }}>
@@ -305,6 +528,7 @@ export function AllProjectsDashboard() {
                   <div className="dashboard-pie" style={{ width: 200 }}>
                     <h4>Villas by Status</h4>
                     <Pie
+                      plugins={[countLabelsPlugin]}
                       data={{
                         labels: STATUS_ORDER,
                         datasets: [
@@ -328,6 +552,7 @@ export function AllProjectsDashboard() {
                     </div>
                     <Pie
                       ref={categoryPlannedRef}
+                      plugins={[percentLabelsPlugin]}
                       data={{
                         labels: categoryBreakdown.categories,
                         datasets: [
@@ -342,7 +567,7 @@ export function AllProjectsDashboard() {
                       }}
                       options={{
                         plugins: {
-                          legend: { position: "bottom", labels: { boxWidth: 10, font: { size: 10 } } },
+                          legend: { position: "bottom", labels: { boxWidth: 10, font: { size: 10 }, generateLabels: legendWithValues } },
                           tooltip: { callbacks: { label: (ctx) => `${ctx.label}: ${formatSAR(ctx.parsed)}` } },
                         },
                       }}
@@ -358,19 +583,40 @@ export function AllProjectsDashboard() {
                     </div>
                     <Pie
                       ref={categoryActualRef}
+                      plugins={[percentLabelsPlugin]}
                       data={{
-                        labels: categoryBreakdown.categories,
+                        // Includes an "Unspent" slice (total planned minus
+                        // total actual) so every real category's percent
+                        // divides by the SAME denominator as the Planned
+                        // pie (total planned budget) instead of the
+                        // smaller "total actual so far" — same fix already
+                        // applied to the Category Breakdown table. Without
+                        // this, a category progressing faster than others
+                        // could show a bigger Actual % than Planned % even
+                        // while its actual cost was still below its
+                        // planned cost, which read as "inaccurate."
+                        labels: [...categoryBreakdown.categories, "Unspent (of planned budget)"],
                         datasets: [
                           {
-                            data: categoryBreakdown.actualCosts,
-                            backgroundColor: "rgba(34, 197, 94, 0.75)",
+                            data: [
+                              ...categoryBreakdown.actualCosts,
+                              Math.max(
+                                0,
+                                categoryBreakdown.plannedCosts.reduce((a, b) => a + b, 0) -
+                                  categoryBreakdown.actualCosts.reduce((a, b) => a + b, 0)
+                              ),
+                            ],
+                            backgroundColor: [
+                              ...categoryBreakdown.categories.map((c) => CATEGORY_COLOR_PALETTE[c] ?? CATEGORY_COLOR_PALETTE.Default),
+                              "#e5e7eb",
+                            ],
                             borderWidth: 0,
                           },
                         ],
                       }}
                       options={{
                         plugins: {
-                          legend: { position: "bottom", labels: { boxWidth: 10, font: { size: 10 } } },
+                          legend: { position: "bottom", labels: { boxWidth: 10, font: { size: 10 }, generateLabels: legendWithValues } },
                           tooltip: { callbacks: { label: (ctx) => `${ctx.label}: ${formatSAR(ctx.parsed)}` } },
                         },
                       }}
@@ -423,10 +669,14 @@ export function AllProjectsDashboard() {
                         downloadRowsAsExcel(
                           categoryTableRows.map((r) => ({
                             Category: r.category,
-                            "Planned Cost": r.plannedCost,
-                            "Planned % of Total Budget": r.plannedPercent.toFixed(1),
-                            "Actual Cost": r.actualCost,
-                            "Actual % of Total Budget": r.actualPercent.toFixed(1),
+                            "Total Planned": r.totalPlanned,
+                            "Total Planned %": r.totalPlannedPercent.toFixed(1),
+                            "Total Actual": r.totalActual,
+                            "Total Actual %": r.totalActualPercent.toFixed(1),
+                            "To-Date Planned": r.toDatePlanned,
+                            "To-Date Planned %": r.toDatePlannedPercent.toFixed(1),
+                            "To-Date Actual": r.toDateActual,
+                            "To-Date Actual %": r.toDateActualPercent.toFixed(1),
                           })),
                           "Category Breakdown",
                           "category_breakdown"
@@ -439,21 +689,33 @@ export function AllProjectsDashboard() {
                   <table className="dashboard-table">
                     <thead>
                       <tr>
-                        <th>Category</th>
-                        <th>Planned Cost</th>
-                        <th>Planned % of Total Budget</th>
-                        <th>Actual Cost</th>
-                        <th>Actual % of Total Budget</th>
+                        <th rowSpan={2}>Category</th>
+                        <th colSpan={4}>Total Budget — whole filtered scope, any date</th>
+                        <th colSpan={4}>Up to {filters.endDate} — date-adjusted</th>
+                      </tr>
+                      <tr>
+                        <th>Planned</th>
+                        <th>Planned %</th>
+                        <th>Actual</th>
+                        <th>Actual %</th>
+                        <th>Planned</th>
+                        <th>Planned %</th>
+                        <th>Actual</th>
+                        <th>Actual %</th>
                       </tr>
                     </thead>
                     <tbody>
                       {categoryTableRows.map((r) => (
                         <tr key={r.category}>
                           <td>{r.category}</td>
-                          <td>{formatCurrency(r.plannedCost)}</td>
-                          <td>{r.plannedPercent.toFixed(1)}%</td>
-                          <td>{formatCurrency(r.actualCost)}</td>
-                          <td>{r.actualPercent.toFixed(1)}%</td>
+                          <td>{formatCurrency(r.totalPlanned)}</td>
+                          <td>{r.totalPlannedPercent.toFixed(1)}%</td>
+                          <td>{formatCurrency(r.totalActual)}</td>
+                          <td>{r.totalActualPercent.toFixed(1)}%</td>
+                          <td>{formatCurrency(r.toDatePlanned)}</td>
+                          <td>{r.toDatePlannedPercent.toFixed(1)}%</td>
+                          <td>{formatCurrency(r.toDateActual)}</td>
+                          <td>{r.toDateActualPercent.toFixed(1)}%</td>
                         </tr>
                       ))}
                     </tbody>

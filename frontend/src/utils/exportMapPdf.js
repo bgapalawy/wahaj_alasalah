@@ -5,13 +5,12 @@
  * combined weight only loads when this is actually used, not on every
  * page view.
  *
- * HONEST CAVEAT: I can't run a real browser in this environment to verify
- * how faithfully html2canvas reproduces the Leaflet map's tiles and SVG
- * overlay layers — it generally handles both, but cross-origin map tiles
- * sometimes render blank depending on the tile server's CORS headers and
- * the browser. Worth checking the first real export closely; if the map
- * tiles are missing from the PDF but the villa shapes/colors are there,
- * that's the CORS case and the fix is different from a code bug.
+ * scale: 3 (not 2) — the export view forces every villanum label visible
+ * at a tiny fixed font size (see .pdf-export-mode in app.css) so ~1,540
+ * labels fit without becoming a solid wall of text. A higher capture
+ * resolution gives that small text enough real pixel data to still read
+ * as text once zoomed into in a PDF viewer, instead of dissolving into a
+ * blur.
  */
 export async function downloadMapAsPDF(targetElement, filename = "wajha-map") {
   if (!targetElement) return;
@@ -24,7 +23,7 @@ export async function downloadMapAsPDF(targetElement, filename = "wajha-map") {
   const canvas = await html2canvas(targetElement, {
     useCORS: true,
     allowTaint: false,
-    scale: 2,
+    scale: 3,
     backgroundColor: "#f8fafc",
   });
 

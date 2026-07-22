@@ -6,6 +6,7 @@ import { dashboardApi } from "../../api/dashboard.js";
 import { calculateDashboardMetrics, getProjectDateRange, formatCurrency } from "../../utils/dashboardUtils.js";
 import { ConstructionItemSelect } from "../panels/ConstructionItemSelect.jsx";
 import { ITEM_STATUS_COLORS as STATUS_COLORS, ITEM_STATUS_ORDER as STATUS_ORDER } from "../../config/itemStatusColors.js";
+import { useVillaGeoMeta } from "../../hooks/useVillaGeoMeta.js";
 
 ChartJS.register(ArcElement, Tooltip, Legend);
 
@@ -22,6 +23,7 @@ export function ConstructionItemDashboard() {
   const [analysisDate, setAnalysisDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [sortKey, setSortKey] = useState("villaID");
   const [sortDir, setSortDir] = useState("asc");
+  const { villaMetaByID } = useVillaGeoMeta();
 
   useEffect(() => {
     if (!selectedItem) return;
@@ -35,30 +37,53 @@ export function ConstructionItemDashboard() {
       .catch(() => setStatus("error"));
   }, [selectedItem]);
 
+  // Every real villa in the GeoJSON, not just the ones the backend has
+  // data for — same fix as the Overview tab's villa count. Villas missing
+  // from the backend get a zero-cost/NotStarted placeholder row.
+  const enrichedRows = useMemo(() => {
+    const knownRows = rows.map((r) => ({
+      ...r,
+      blocknum: villaMetaByID[r.villaID]?.blocknum ?? r.blocknum ?? null,
+    }));
+    const knownVillaIDs = new Set(rows.map((r) => r.villaID));
+    const missingVillaIDs = Object.keys(villaMetaByID).filter((id) => !knownVillaIDs.has(id));
+    const synthesized = missingVillaIDs.map((villaID) => ({
+      villaID,
+      blocknum: villaMetaByID[villaID]?.blocknum ?? null,
+      plannedCost: 0,
+      actualCost: 0,
+      plannedStartDate: null,
+      plannedFinishDate: null,
+      actualStatus: "NotStarted",
+      actualCompletedDate: null,
+    }));
+    return [...knownRows, ...synthesized];
+  }, [rows, villaMetaByID]);
+
   const statusCounts = useMemo(() => {
     const counts = {};
-    rows.forEach((r) => {
+    enrichedRows.forEach((r) => {
       counts[r.actualStatus] = (counts[r.actualStatus] ?? 0) + 1;
     });
     return counts;
-  }, [rows]);
+  }, [enrichedRows]);
 
   const metrics = useMemo(() => {
     const date = new Date(`${analysisDate}T00:00:00`);
-    return calculateDashboardMetrics(rows, date);
-  }, [rows, analysisDate]);
+    return calculateDashboardMetrics(enrichedRows, date);
+  }, [enrichedRows, analysisDate]);
 
-  const dateSummary = useMemo(() => getProjectDateRange(rows), [rows]);
+  const dateSummary = useMemo(() => getProjectDateRange(enrichedRows), [enrichedRows]);
 
   const sortedRows = useMemo(() => {
-    return [...rows].sort((a, b) => {
+    return [...enrichedRows].sort((a, b) => {
       const dir = sortDir === "asc" ? 1 : -1;
       const av = a[sortKey] ?? "";
       const bv = b[sortKey] ?? "";
       if (typeof av === "string") return av.localeCompare(bv) * dir;
       return (av - bv) * dir;
     });
-  }, [rows, sortKey, sortDir]);
+  }, [enrichedRows, sortKey, sortDir]);
 
   function toggleSort(key) {
     if (sortKey === key) {
@@ -99,29 +124,56 @@ export function ConstructionItemDashboard() {
 
       {selectedItem && status === "success" && (
         <>
-          <div className="dashboard-controls">
-            <label>
-              Analysis date
-              <input type="date" value={analysisDate} onChange={(e) => setAnalysisDate(e.target.value)} />
-            </label>
-          </div>
-
           <div className="dashboard-summary-cards">
             <div className="summary-card">
               <span>Active Villas</span>
-              <strong>{rows.length}</strong>
+              <strong>{enrichedRows.length}</strong>
             </div>
-            <div className="summary-card">
-              <span>Planned Value (to date)</span>
-              <strong>{formatCurrency(metrics.plannedCostToDate)}</strong>
+          </div>
+
+          <div>
+            <h4 style={{ fontSize: "0.85rem", color: "var(--color-text-muted)", margin: "0 0 0.5rem" }}>
+              Total — whole item, any date
+            </h4>
+            <div className="dashboard-summary-cards">
+              <div className="summary-card">
+                <span>Total Planned</span>
+                <strong>{formatCurrency(metrics.grandTotal)}</strong>
+              </div>
+              <div className="summary-card">
+                <span>Total Actual</span>
+                <strong>{formatCurrency(metrics.totalActual)}</strong>
+              </div>
+              <div className="summary-card">
+                <span>% Spent</span>
+                <strong>{metrics.totalActualPercent.toFixed(1)}%</strong>
+              </div>
             </div>
-            <div className="summary-card">
-              <span>Actual Value (to date)</span>
-              <strong>{formatCurrency(metrics.actualCostToDate)}</strong>
+          </div>
+
+          <div>
+            <h4 style={{ fontSize: "0.85rem", color: "var(--color-text-muted)", margin: "0 0 0.5rem" }}>
+              Up to {analysisDate} — date-adjusted
+            </h4>
+            <div className="dashboard-controls" style={{ marginBottom: "0.5rem" }}>
+              <label>
+                Analysis date
+                <input type="date" value={analysisDate} onChange={(e) => setAnalysisDate(e.target.value)} />
+              </label>
             </div>
-            <div className="summary-card">
-              <span>Overall % Actual</span>
-              <strong>{metrics.totalActualPercent.toFixed(1)}%</strong>
+            <div className="dashboard-summary-cards">
+              <div className="summary-card">
+                <span>Planned Value (to date)</span>
+                <strong>{formatCurrency(metrics.plannedCostToDate)}</strong>
+              </div>
+              <div className="summary-card">
+                <span>Actual Value (to date)</span>
+                <strong>{formatCurrency(metrics.actualCostToDate)}</strong>
+              </div>
+              <div className="summary-card">
+                <span>% Spent (to date)</span>
+                <strong>{metrics.actualPercent.toFixed(1)}%</strong>
+              </div>
             </div>
           </div>
 
@@ -184,6 +236,7 @@ export function ConstructionItemDashboard() {
                     ["plannedCost", "Planned Cost"],
                     ["actualCost", "Actual Cost"],
                     ["plannedFinishDate", "Planned Finish"],
+                    ["actualCompletedDate", "Actual Finish"],
                   ].map(([key, label]) => (
                     <th key={key} onClick={() => toggleSort(key)}>
                       {label} {sortKey === key ? (sortDir === "asc" ? "▲" : "▼") : ""}
@@ -200,11 +253,12 @@ export function ConstructionItemDashboard() {
                     <td>{formatCurrency(r.plannedCost)}</td>
                     <td>{formatCurrency(r.actualCost)}</td>
                     <td>{r.plannedFinishDate ?? "—"}</td>
+                    <td>{r.actualCompletedDate ?? "—"}</td>
                   </tr>
                 ))}
                 {sortedRows.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="dashboard-table-empty">
+                    <td colSpan={7} className="dashboard-table-empty">
                       No villas found for this item.
                     </td>
                   </tr>

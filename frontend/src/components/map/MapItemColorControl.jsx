@@ -23,6 +23,11 @@ export function MapItemColorControl({
   onChange,
   loading,
   statusCounts = {},
+  remainingCount = null,
+  totalProjectVillas = null,
+  statusHighlight = null,
+  onToggleStatusHighlight,
+  onClearStatusHighlight,
   blockOptions = [],
   zoneOptions = [],
   selectedBlocks = [],
@@ -35,11 +40,11 @@ export function MapItemColorControl({
   villaTypeOptions = [],
   selectedVillaTypes = [],
   onVillaTypesChange,
-  highlightBlock,
+  highlightBlocks = [],
   highlightBlockOptions = [],
-  onHighlightBlockChange,
-  highlightZone,
-  onHighlightZoneChange,
+  onHighlightBlocksChange,
+  highlightZones = [],
+  onHighlightZonesChange,
   showBoundary,
   onShowBoundaryChange,
 }) {
@@ -101,38 +106,23 @@ export function MapItemColorControl({
             <div className="map-highlight-row">
               <span className="map-highlight-label">Highlight:</span>
               {zoneOptions.length > 0 && (
-                <select
-                  value={highlightZone ?? ""}
-                  onChange={(e) => onHighlightZoneChange(e.target.value || null)}
-                >
-                  <option value="">Zone…</option>
-                  {zoneOptions.map((z) => (
-                    <option key={z} value={z}>
-                      Zone {z}
-                    </option>
-                  ))}
-                </select>
+                <MultiSelect label="Zone" options={zoneOptions} value={highlightZones} onChange={onHighlightZonesChange} />
               )}
               {highlightBlockOptions.length > 0 && (
-                <select
-                  value={highlightBlock ?? ""}
-                  onChange={(e) => onHighlightBlockChange(e.target.value || null)}
-                >
-                  <option value="">Block…</option>
-                  {highlightBlockOptions.map((b) => (
-                    <option key={b} value={b}>
-                      Block {b}
-                    </option>
-                  ))}
-                </select>
+                <MultiSelect
+                  label="Block"
+                  options={highlightBlockOptions}
+                  value={highlightBlocks}
+                  onChange={onHighlightBlocksChange}
+                />
               )}
-              {(highlightBlock || highlightZone) && (
+              {(highlightBlocks.length > 0 || highlightZones.length > 0) && (
                 <button
                   type="button"
                   className="map-item-color-clear"
                   onClick={() => {
-                    onHighlightBlockChange(null);
-                    onHighlightZoneChange(null);
+                    onHighlightBlocksChange([]);
+                    onHighlightZonesChange([]);
                   }}
                 >
                   Clear
@@ -148,6 +138,23 @@ export function MapItemColorControl({
 
           {loading && <LoadingRing label="Loading…" />}
 
+          {(remainingCount !== null || totalProjectVillas !== null) && (
+            <div className="map-badge-row">
+              {totalProjectVillas !== null && (
+                <div className="map-remaining-badge" title="Every real villa in the site plan">
+                  <span className="map-remaining-badge-icon">▦</span>
+                  Total project: <strong>{totalProjectVillas}</strong>
+                </div>
+              )}
+              {remainingCount !== null && remainingCount > 0 && (
+                <div className="map-remaining-badge" title="Real villas outside the current filter">
+                  <span className="map-remaining-badge-icon">⊘</span>
+                  Not filtered: <strong>{remainingCount}</strong>
+                </div>
+              )}
+            </div>
+          )}
+
           {!loading && selectedItem && (
             <div className="map-item-color-legend">
               <div className="map-item-color-legend-with-chart">
@@ -158,18 +165,30 @@ export function MapItemColorControl({
                   {ITEM_STATUS_ORDER.map((s) => {
                     const count = statusCounts[s] ?? 0;
                     const percent = total > 0 ? (count / total) * 100 : 0;
+                    const isActive = statusHighlight && statusHighlight.has(s);
                     return (
-                      <span key={s} className="map-item-color-legend-row">
+                      <button
+                        type="button"
+                        key={s}
+                        className={`map-item-color-legend-row map-item-color-legend-row-clickable ${isActive ? "is-active" : ""}`}
+                        onClick={() => onToggleStatusHighlight?.(s)}
+                        title="Click to spotlight this status on the map (doesn't change any counts)"
+                      >
                         <span className="legend-swatch" style={{ backgroundColor: ITEM_STATUS_COLORS[s] }} />
                         {s}
                         <span className="map-item-color-count">
                           {count} <span className="map-item-color-percent">({percent.toFixed(0)}%)</span>
                         </span>
-                      </span>
+                      </button>
                     );
                   })}
                 </div>
               </div>
+              {statusHighlight && statusHighlight.size > 0 && (
+                <button type="button" className="map-item-color-clear" onClick={onClearStatusHighlight}>
+                  Clear status spotlight
+                </button>
+              )}
             </div>
           )}
         </>

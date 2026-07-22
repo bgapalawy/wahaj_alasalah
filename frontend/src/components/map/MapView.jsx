@@ -1,12 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import L from "leaflet";
-import { MapContainer, TileLayer, Marker, useMap } from "react-leaflet";
+import { MapContainer, Marker, useMap } from "react-leaflet";
 import { VillaLayer } from "./VillaLayer.jsx";
 import { BoundaryLayer } from "./BoundaryLayer.jsx";
 import { MapPanControl } from "./MapPanControl.jsx";
 import { MapItemColorControl } from "./MapItemColorControl.jsx";
-import { MAP_DEFAULTS, GEOJSON_URL } from "../../config/mapConfig.js";
+import { MAP_DEFAULTS, GEOJSON_URL, BOUNDARY_GEOJSON_URL } from "../../config/mapConfig.js";
 import { useConstructionItemStatus } from "../../hooks/useConstructionItemStatus.js";
+import { renderPrintableMap } from "../../utils/renderPrintableMap.js";
 
 // Fits the map to the loaded geometry's bounds instead of relying on a
 // hardcoded setView(). This is the fix that resolved the earlier
@@ -29,16 +30,101 @@ function FitToBounds({ geojson }) {
   return null;
 }
 
-export function MapView({ onVillaClick, colorByItem, onColorByItemChange }) {
+export const MapView = forwardRef(function MapView({ onVillaClick, colorByItem, onColorByItemChange }, ref) {
   const [geojson, setGeojson] = useState(null);
+  const [boundaryGeojson, setBoundaryGeojson] = useState(null);
   const [loadError, setLoadError] = useState(null);
   const [selectedBlocks, setSelectedBlocks] = useState([]);
   const [selectedZones, setSelectedZones] = useState([]);
   const [selectedVillas, setSelectedVillas] = useState([]);
   const [selectedVillaTypes, setSelectedVillaTypes] = useState([]);
-  const [highlightBlock, setHighlightBlock] = useState(null);
-  const [highlightZone, setHighlightZone] = useState(null);
+  const [highlightBlocks, setHighlightBlocks] = useState([]);
+  const [highlightZones, setHighlightZones] = useState([]);
   const [showBoundary, setShowBoundary] = useState(false);
+  // Click a status in the legend to spotlight only that status on the
+  // map — visual only, multi-select (Set for fast lookup in the style
+  // function, which runs per-parcel).
+  const [statusHighlight, setStatusHighlight] = useState(() => new Set());
+
+  function toggleStatusHighlight(status) {
+    setStatusHighlight((prev) => {
+      const next = new Set(prev);
+      if (next.has(status)) next.delete(status);
+      else next.add(status);
+      return next;
+    });
+  }
+
+  function clearStatusHighlight() {
+    setStatusHighlight(new Set());
+  }
+  const [forceAllLabels, setForceAllLabels] = useState(false);
+  const mapInstanceRef = useRef(null);
+  const savedViewRef = useRef(null);
+
+  // Exposed to App.jsx so "Download PDF" can zoom out to fit BOTH the
+  // villa parcels and the project boundary together, force every villa
+  // label visible, wait for it to render, capture, then put the view
+  // back exactly how it was. Fitting to villa parcels alone (the earlier
+  // version) left the boundary sprawling outside the captured frame with
+  // a large empty gap between it and the villa cluster.
+  useImperativeHandle(ref, () => ({
+    async prepareForExport() {
+      const map = mapInstanceRef.current;
+      if (!map) return;
+      savedViewRef.current = { center: map.getCenter(), zoom: map.getZoom() };
+      setForceAllLabels(true);
+
+      const combined = L.latLngBounds([]);
+      if (geojson) {
+        const b = L.geoJSON(geojson).getBounds();
+        if (b.isValid()) combined.extend(b);
+      }
+      if (boundaryGeojson) {
+        const b = L.geoJSON(boundaryGeojson).getBounds();
+        if (b.isValid()) combined.extend(b);
+      }
+
+      if (combined.isValid()) {
+        await new Promise((resolve) => {
+          map.once("moveend", resolve);
+          map.fitBounds(combined, { padding: [30, 30], animate: false });
+        });
+      }
+
+      // Best-effort wait for tiles at the new zoom/pan to finish loading
+      // and for the debounced label-visibility pass to settle. There's no
+      // fully reliable "everything is done rendering" signal to hook here
+      // without much more plumbing, so this is a fixed buffer rather than
+      // a precise one.
+      await new Promise((resolve) => setTimeout(resolve, 900));
+    },
+    restoreAfterExport() {
+      const map = mapInstanceRef.current;
+      setForceAllLabels(false);
+      if (map && savedViewRef.current) {
+        map.setView(savedViewRef.current.center, savedViewRef.current.zoom, { animate: false });
+      }
+    },
+    // Two earlier approaches to this both failed: native browser print of
+    // the live Leaflet map came back blank (Leaflet positions its panes
+    // with CSS transform, which browsers' print rendering frequently
+    // fails to render), and an html2canvas screenshot of the map
+    // container still wasn't reliable. This draws the map directly from
+    // the raw GeoJSON onto a canvas — not a screenshot of anything, so
+    // neither failure mode applies.
+    captureMapSnapshot() {
+      return renderPrintableMap({
+        geojson,
+        boundaryGeojson,
+        itemStatusLookup,
+        filteredVillaIDs,
+        highlightVillaIDs,
+        titleText: "Sahms ElGhroub — Site Map",
+        subtitleText: colorByItem ? `Colored by: ${colorByItem.name}` : undefined,
+      });
+    },
+  }));
 
   // Block, Zone (zonenum), and Villa Type all live on the GeoJSON feature
   // properties (the ArcGIS export) — not in the DynamoDB villas table,
@@ -60,8 +146,8 @@ export function MapView({ onVillaClick, colorByItem, onColorByItemChange }) {
     return map;
   }, [geojson]);
 
-  // Hierarchy: Zone > Block > Villa. Villa Type is a separate, independent
-  // classification, not part of this geographic chain.
+  // Hierarchy: Zone > Block > Villa Type > Villa. Each level narrows the
+  // options for the next.
   const zoneOptions = useMemo(
     () => [...new Set(Object.values(villaMetaByID).map((m) => m.zonenum))].filter(Boolean).sort(),
     [villaMetaByID]
@@ -75,17 +161,20 @@ export function MapView({ onVillaClick, colorByItem, onColorByItemChange }) {
     return [...new Set(scoped.map((m) => m.blocknum))].filter(Boolean).sort();
   }, [villaMetaByID, selectedZones]);
 
-  const villaTypeOptions = useMemo(
-    () => [...new Set(Object.values(villaMetaByID).map((m) => m.villatype))].filter(Boolean).sort(),
-    [villaMetaByID]
-  );
+  const villaTypeOptions = useMemo(() => {
+    let scoped = Object.values(villaMetaByID);
+    if (selectedZones.length > 0) scoped = scoped.filter((m) => selectedZones.includes(m.zonenum));
+    if (selectedBlocks.length > 0) scoped = scoped.filter((m) => selectedBlocks.includes(m.blocknum));
+    return [...new Set(scoped.map((m) => m.villatype))].filter(Boolean).sort();
+  }, [villaMetaByID, selectedZones, selectedBlocks]);
 
   const villaOptions = useMemo(() => {
     let scoped = Object.entries(villaMetaByID);
     if (selectedZones.length > 0) scoped = scoped.filter(([, m]) => selectedZones.includes(m.zonenum));
     if (selectedBlocks.length > 0) scoped = scoped.filter(([, m]) => selectedBlocks.includes(m.blocknum));
+    if (selectedVillaTypes.length > 0) scoped = scoped.filter(([, m]) => selectedVillaTypes.includes(m.villatype));
     return scoped.map(([id]) => id).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-  }, [villaMetaByID, selectedZones, selectedBlocks]);
+  }, [villaMetaByID, selectedZones, selectedBlocks, selectedVillaTypes]);
 
   // Drop selections that fall out of scope when a parent filter changes
   // (e.g. a block from a zone you just deselected) — same pattern as the
@@ -93,6 +182,9 @@ export function MapView({ onVillaClick, colorByItem, onColorByItemChange }) {
   useEffect(() => {
     setSelectedBlocks((prev) => prev.filter((b) => blockOptions.includes(b)));
   }, [blockOptions]);
+  useEffect(() => {
+    setSelectedVillaTypes((prev) => prev.filter((t) => villaTypeOptions.includes(t)));
+  }, [villaTypeOptions]);
   useEffect(() => {
     setSelectedVillas((prev) => prev.filter((v) => villaOptions.includes(v)));
   }, [villaOptions]);
@@ -116,33 +208,35 @@ export function MapView({ onVillaClick, colorByItem, onColorByItemChange }) {
     return set;
   }, [villaMetaByID, selectedBlocks, selectedZones, selectedVillas, selectedVillaTypes]);
 
-  // Highlight follows the same Zone > Block hierarchy: picking a zone
-  // narrows which blocks are offered, and clears an out-of-scope block
-  // selection instead of silently highlighting nothing.
+  // Highlight follows the same Zone > Block hierarchy: picking zones
+  // narrows which blocks are offered, and drops out-of-scope block
+  // selections instead of silently highlighting nothing. Both are now
+  // multi-select — highlight several blocks/zones at once.
   const highlightBlockOptions = useMemo(() => {
-    const scoped = highlightZone
-      ? Object.values(villaMetaByID).filter((m) => m.zonenum === highlightZone)
-      : Object.values(villaMetaByID);
+    const scoped =
+      highlightZones.length > 0
+        ? Object.values(villaMetaByID).filter((m) => highlightZones.includes(m.zonenum))
+        : Object.values(villaMetaByID);
     return [...new Set(scoped.map((m) => m.blocknum))].filter(Boolean).sort();
-  }, [villaMetaByID, highlightZone]);
+  }, [villaMetaByID, highlightZones]);
 
   useEffect(() => {
-    if (highlightBlock && !highlightBlockOptions.includes(highlightBlock)) setHighlightBlock(null);
-  }, [highlightBlockOptions, highlightBlock]);
+    setHighlightBlocks((prev) => prev.filter((b) => highlightBlockOptions.includes(b)));
+  }, [highlightBlockOptions]);
 
-  // Spotlight, not a filter — villas matching the chosen block/zone get a
+  // Spotlight, not a filter — villas matching any chosen block/zone get a
   // bright outline on top of their normal color, everything else is
   // untouched. Independent of the multi-select filters above.
   const highlightVillaIDs = useMemo(() => {
-    if (!highlightBlock && !highlightZone) return null;
+    if (highlightBlocks.length === 0 && highlightZones.length === 0) return null;
     const set = new Set();
     Object.entries(villaMetaByID).forEach(([villaID, meta]) => {
-      if (highlightBlock && meta.blocknum !== highlightBlock) return;
-      if (highlightZone && meta.zonenum !== highlightZone) return;
+      if (highlightBlocks.length > 0 && !highlightBlocks.includes(meta.blocknum)) return;
+      if (highlightZones.length > 0 && !highlightZones.includes(meta.zonenum)) return;
       set.add(villaID);
     });
     return set;
-  }, [villaMetaByID, highlightBlock, highlightZone]);
+  }, [villaMetaByID, highlightBlocks, highlightZones]);
 
   // Center point of whatever's currently highlighted, for the on-map
   // "Block X" / "Zone X" label — the combined bounding box of every
@@ -156,7 +250,10 @@ export function MapView({ onVillaClick, colorByItem, onColorByItemChange }) {
     return bounds.isValid() ? bounds.getCenter() : null;
   }, [geojson, highlightVillaIDs]);
 
-  const highlightLabelText = [highlightBlock && `Block ${highlightBlock}`, highlightZone && `Zone ${highlightZone}`]
+  const highlightLabelText = [
+    highlightBlocks.length > 0 && `Block ${highlightBlocks.join(", ")}`,
+    highlightZones.length > 0 && `Zone ${highlightZones.join(", ")}`,
+  ]
     .filter(Boolean)
     .join(" / ");
 
@@ -182,6 +279,15 @@ export function MapView({ onVillaClick, colorByItem, onColorByItemChange }) {
     return counts;
   }, [itemStatusLookup, filteredVillaIDs, villaMetaByID]);
 
+  // Villas excluded by the active filter — shown as a small standalone
+  // "Remaining" badge, separate from the donut/legend (which now counts
+  // only the filtered scope, per feedback that the previous "Other" row
+  // was diluting those percentages with the whole project).
+  const remainingCount = useMemo(() => {
+    if (!filteredVillaIDs) return null;
+    return Object.keys(villaMetaByID).length - filteredVillaIDs.size;
+  }, [villaMetaByID, filteredVillaIDs]);
+
   useEffect(() => {
     fetch(GEOJSON_URL)
       .then((res) => {
@@ -190,6 +296,17 @@ export function MapView({ onVillaClick, colorByItem, onColorByItemChange }) {
       })
       .then(setGeojson)
       .catch(setLoadError);
+  }, []);
+
+  // Fetched eagerly (not just when toggled on) so "Download PDF" always
+  // has the boundary's extent available to combine with the villa
+  // parcels' bounds — a 404 here is fine, the boundary feature is
+  // optional and this just leaves boundaryGeojson null.
+  useEffect(() => {
+    fetch(BOUNDARY_GEOJSON_URL)
+      .then((res) => (res.ok ? res.json() : null))
+      .then(setBoundaryGeojson)
+      .catch(() => setBoundaryGeojson(null));
   }, []);
 
   if (loadError) {
@@ -203,24 +320,23 @@ export function MapView({ onVillaClick, colorByItem, onColorByItemChange }) {
   return (
     <>
       <MapContainer
+        ref={mapInstanceRef}
         center={MAP_DEFAULTS.center}
         zoom={MAP_DEFAULTS.zoom}
         minZoom={MAP_DEFAULTS.minZoom}
         maxZoom={MAP_DEFAULTS.maxZoom}
         style={{ height: "100%", width: "100%" }}
       >
-        <TileLayer
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          attribution="&copy; OpenStreetMap contributors"
-        />
         <VillaLayer
           geojson={geojson}
           itemStatusLookup={itemStatusLookup}
           filteredVillaIDs={filteredVillaIDs}
           highlightVillaIDs={highlightVillaIDs}
+          statusHighlight={statusHighlight}
+          forceAllLabels={forceAllLabels}
           onVillaClick={onVillaClick}
         />
-        <BoundaryLayer visible={showBoundary} />
+        <BoundaryLayer geojson={boundaryGeojson} visible={showBoundary || forceAllLabels} />
         {highlightCenter && highlightLabelText && (
           <Marker
             position={highlightCenter}
@@ -241,6 +357,8 @@ export function MapView({ onVillaClick, colorByItem, onColorByItemChange }) {
         onChange={onColorByItemChange}
         loading={itemStatusLoadStatus === "loading"}
         statusCounts={statusCounts}
+        remainingCount={remainingCount}
+        totalProjectVillas={Object.keys(villaMetaByID).length}
         blockOptions={blockOptions}
         zoneOptions={zoneOptions}
         selectedBlocks={selectedBlocks}
@@ -253,14 +371,17 @@ export function MapView({ onVillaClick, colorByItem, onColorByItemChange }) {
         villaTypeOptions={villaTypeOptions}
         selectedVillaTypes={selectedVillaTypes}
         onVillaTypesChange={setSelectedVillaTypes}
-        highlightBlock={highlightBlock}
+        highlightBlocks={highlightBlocks}
         highlightBlockOptions={highlightBlockOptions}
-        onHighlightBlockChange={setHighlightBlock}
-        highlightZone={highlightZone}
-        onHighlightZoneChange={setHighlightZone}
+        onHighlightBlocksChange={setHighlightBlocks}
+        highlightZones={highlightZones}
+        onHighlightZonesChange={setHighlightZones}
+        statusHighlight={statusHighlight}
+        onToggleStatusHighlight={toggleStatusHighlight}
+        onClearStatusHighlight={clearStatusHighlight}
         showBoundary={showBoundary}
         onShowBoundaryChange={setShowBoundary}
       />
     </>
   );
-}
+});

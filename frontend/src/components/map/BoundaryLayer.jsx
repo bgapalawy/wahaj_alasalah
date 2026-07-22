@@ -1,6 +1,4 @@
-import { useEffect, useState } from "react";
 import { GeoJSON } from "react-leaflet";
-import { BOUNDARY_GEOJSON_URL } from "../../config/mapConfig.js";
 
 const BOUNDARY_STYLE = {
   color: "#c7cbd1",
@@ -10,29 +8,12 @@ const BOUNDARY_STYLE = {
 
 /**
  * The outer project boundary — a separate GeoJSON file from the villa
- * parcels. Only fetched once actually toggled on, since it's a
- * nice-to-have overlay, not part of the core map.
+ * parcels. Geojson is fetched by the parent (MapView) rather than here,
+ * so MapView can compute a combined villa+boundary extent for PDF export
+ * instead of only fitting to the villa parcels and leaving the boundary
+ * to sprawl outside the captured frame.
  */
-export function BoundaryLayer({ visible }) {
-  const [geojson, setGeojson] = useState(null);
-  const [status, setStatus] = useState("idle"); // idle | loading | success | error
-
-  useEffect(() => {
-    if (!visible || geojson || status === "loading" || status === "error") return;
-    setStatus("loading");
-    fetch(BOUNDARY_GEOJSON_URL)
-      .then((res) => {
-        if (!res.ok) throw new Error(`Failed to load ${BOUNDARY_GEOJSON_URL} (${res.status})`);
-        return res.json();
-      })
-      .then((data) => {
-        setGeojson(data);
-        setStatus("success");
-      })
-      .catch(() => setStatus("error"));
-  }, [visible, geojson, status]);
-
+export function BoundaryLayer({ geojson, visible }) {
   if (!visible || !geojson) return null;
-
   return <GeoJSON data={geojson} style={BOUNDARY_STYLE} interactive={false} />;
 }

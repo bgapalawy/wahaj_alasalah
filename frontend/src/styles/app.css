@@ -450,6 +450,33 @@ button, input, select {
   color: var(--color-text);
 }
 
+.map-item-color-legend-row-clickable {
+  width: 100%;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 0.2rem 0.3rem;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+}
+
+.map-item-color-legend-row-clickable:hover {
+  background: var(--color-surface-alt);
+}
+
+.map-item-color-legend-row-clickable.is-active {
+  background: var(--color-primary-light);
+  outline: 1.5px solid var(--color-primary);
+}
+
+.map-badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
 .map-item-color-legend-row .legend-swatch {
   width: 12px;
   height: 12px;
@@ -514,9 +541,80 @@ button, input, select {
   color: white;
 }
 
+.map-remaining-badge {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.6rem;
+  background: var(--color-surface-alt);
+  border-radius: var(--radius-pill);
+  font-size: 0.72rem;
+  color: var(--color-text-muted);
+  width: fit-content;
+}
+
+.map-remaining-badge-icon {
+  color: #6b7280;
+  font-weight: 700;
+}
+
+.map-remaining-badge strong {
+  color: var(--color-text);
+}
+
 .map-error {
   padding: var(--space-6);
   color: var(--color-danger);
+}
+
+.leaflet-container {
+  background: var(--color-surface-alt) !important;
+}
+
+/* Native browser print (window.print()) instead of a screenshot library —
+   hide the app chrome that shouldn't appear in the printout, keep the
+   map content and any open info cards. */
+/* Native browser print (window.print()) instead of a screenshot library —
+   hide the app chrome that shouldn't appear in the printout, keep the
+   map content and any open info cards.
+
+   Deliberately NOT forcing height/overflow overrides on .app-shell /
+   .app-main here anymore — an earlier version did, to "let content flow
+   across pages," but .app-main normally gets its height from `flex: 1`
+   in its flex-column parent, and forcing height:auto on that parent
+   broke that sizing rather than fixing anything. The print-map-snapshot
+   image below doesn't depend on any ancestor's height at all (it's a
+   plain in-flow block sized by its own aspect ratio), so none of this
+   height gymnastics should be needed in the first place. */
+@media print {
+  .app-header,
+  .leaflet-control-zoom,
+  .map-pan-control {
+    display: none !important;
+  }
+
+  /* Leaflet's map panes are positioned with CSS transform, which
+     browsers frequently fail to render in print output even though it
+     displays fine on screen — hide the live map entirely and show the
+     pre-captured static snapshot instead. display:none (not
+     visibility:hidden) now that the snapshot image doesn't need this
+     element's box preserved for absolute positioning — it's a normal
+     in-flow element now, not overlaid on top of anything. */
+  .leaflet-container {
+    display: none !important;
+  }
+}
+
+.print-map-snapshot {
+  display: none;
+}
+
+@media print {
+  .print-map-snapshot {
+    display: block !important;
+    width: 100%;
+    height: auto;
+  }
 }
 
 .highlight-block-label span {
@@ -544,6 +642,16 @@ button, input, select {
   padding: 0 !important;
   text-shadow: 0 0 2px white, 0 0 2px white, 0 0 2px white;
   pointer-events: none;
+}
+
+/* Export mode: fixed small font regardless of the map's zoom level —
+   at a full-site overview, individual parcels are only a few pixels
+   wide, so the normal 11px label would itself be bigger than the
+   parcel. Font size is intentionally decoupled from map zoom here. */
+.pdf-export-mode .villa-label-tooltip {
+  font-size: 4px !important;
+  font-weight: 600 !important;
+  text-shadow: 0 0 1px white, 0 0 1px white;
 }
 
 .villa-label-tooltip::before {

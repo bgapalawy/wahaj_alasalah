@@ -14,9 +14,22 @@ const HIGHLIGHT_COLOR = "#ea580c"; // safety-orange accent, consistent with the 
 const LABEL_MIN_WIDTH_PX = 45;
 const LABEL_MIN_HEIGHT_PX = 24;
 
+// Export mode (forceAllLabels) needs a MUCH smaller threshold, paired
+// with a much smaller font (see .pdf-export-mode .villa-label-tooltip in
+// app.css) — at a full-site overview zoom, ~1,540 parcels are only a few
+// pixels each. Literally forcing every label open regardless of size (the
+// first version of this) just reproduced the overlapping-mess problem at
+// full scale. This is still not going to look reasonable — genuinely
+// unreadable with a fixed threshold on a raster capture — but tiny text
+// keeps it a compact texture instead of a wall of overlapping full-size
+// numbers, and still hides truly sliver-sized parcels.
+const EXPORT_LABEL_MIN_WIDTH_PX = 3;
+const EXPORT_LABEL_MIN_HEIGHT_PX = 2;
+
 /**
  * Renders villa parcel polygons, colored one of two ways:
- *  - default: each villa's overall computed status (NotStarted/InProgress/Completed)
+ *  - default: flat neutral color for every real villa (no construction
+ *    item selected)
  *  - item mode (itemStatusLookup provided): a single construction item's
  *    status for that villa (NotStarted/NCR/Notes/Rejected/Completed) —
  *    replaces the original app's coloringvillas() feature.
@@ -40,7 +53,9 @@ export function VillaLayer({
   itemStatusLookup = null,
   filteredVillaIDs = null,
   highlightVillaIDs = null,
+  statusHighlight = null,
   showLabels = true,
+  forceAllLabels = false,
   onVillaClick,
 }) {
   const layerRef = useRef(null);
@@ -65,8 +80,9 @@ export function VillaLayer({
       }
 
       let base;
+      let itemStatus = null;
       if (itemStatusLookup) {
-        const itemStatus = itemStatusLookup[villaID] ?? "NotStarted";
+        itemStatus = itemStatusLookup[villaID] ?? "NotStarted";
         base = {
           fillColor: ITEM_STATUS_COLORS[itemStatus] ?? ITEM_STATUS_COLORS.NotStarted,
           fillOpacity: 0.75,
@@ -74,10 +90,23 @@ export function VillaLayer({
       } else {
         // No construction item selected — flat neutral color for every
         // real villa instead of automatically rolling up overall status
-        // across all 82 activities. That roll-up is still available (see
-        // villaLookup/computeVillaStatus) but showing it unprompted read
-        // as "why are villas colored when I haven't picked anything."
+        // across all 82 activities.
         base = NEUTRAL_VILLA_STYLE;
+      }
+
+      // Clicking a status in the legend spotlights just that status —
+      // purely visual (this never touches filteredVillaIDs, statusCounts,
+      // or any percentage/calculation), same "dim everything else" idea
+      // as the block/zone highlight but keyed on status instead of
+      // geography. Multi-select: several statuses can be spotlighted at
+      // once.
+      if (statusHighlight && statusHighlight.size > 0 && itemStatus && !statusHighlight.has(itemStatus)) {
+        return {
+          color: "#1f2937",
+          weight: 1,
+          fillColor: "#000000",
+          fillOpacity: 0.35,
+        };
       }
 
       return {
@@ -86,7 +115,7 @@ export function VillaLayer({
         weight: isHighlighted ? 3 : 1,
       };
     },
-    [itemStatusLookup, filteredVillaIDs, highlightVillaIDs]
+    [itemStatusLookup, filteredVillaIDs, highlightVillaIDs, statusHighlight]
   );
 
   // Restyle in place whenever the style function changes, instead of
@@ -109,8 +138,18 @@ export function VillaLayer({
   // screen to read, recomputed on zoom/pan. Checked in real pixels, not a
   // flat zoom cutoff, so it self-adapts across areas with very different
   // parcel sizes instead of over- or under-showing labels site-wide.
+  // `forceAllLabels` bypasses the size check entirely — used for PDF
+  // export, where every villa number should show regardless of how small
+  // it renders on screen.
+  //
+  // Debounced: this loops over every one of ~1,540 layers on every single
+  // moveend. Undebounced, rapid pan-arrow clicks (or a fast drag) queued
+  // up several of these full passes back to back and froze the tab.
   useEffect(() => {
     if (!layerRef.current) return;
+    let debounceTimer = null;
+
+    map.getContainer().classList.toggle("pdf-export-mode", forceAllLabels);
 
     function updateLabelVisibility() {
       layerRef.current.eachLayer((layer) => {
@@ -125,20 +164,28 @@ export function VillaLayer({
         const se = map.latLngToContainerPoint(bounds.getSouthEast());
         const widthPx = Math.abs(se.x - nw.x);
         const heightPx = Math.abs(se.y - nw.y);
-        const bigEnough = widthPx >= LABEL_MIN_WIDTH_PX && heightPx >= LABEL_MIN_HEIGHT_PX;
+        const minWidth = forceAllLabels ? EXPORT_LABEL_MIN_WIDTH_PX : LABEL_MIN_WIDTH_PX;
+        const minHeight = forceAllLabels ? EXPORT_LABEL_MIN_HEIGHT_PX : LABEL_MIN_HEIGHT_PX;
+        const bigEnough = widthPx >= minWidth && heightPx >= minHeight;
         if (bigEnough) layer.openTooltip();
         else layer.closeTooltip();
       });
     }
 
+    function scheduleUpdate() {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(updateLabelVisibility, 120);
+    }
+
     updateLabelVisibility();
-    map.on("zoomend", updateLabelVisibility);
-    map.on("moveend", updateLabelVisibility);
+    map.on("zoomend", scheduleUpdate);
+    map.on("moveend", scheduleUpdate);
     return () => {
-      map.off("zoomend", updateLabelVisibility);
-      map.off("moveend", updateLabelVisibility);
+      clearTimeout(debounceTimer);
+      map.off("zoomend", scheduleUpdate);
+      map.off("moveend", scheduleUpdate);
     };
-  }, [map, showLabels, geojson]);
+  }, [map, showLabels, forceAllLabels, geojson]);
 
   const onEachFeature = (feature, layer) => {
     const villaID = feature.properties?.villaID;
