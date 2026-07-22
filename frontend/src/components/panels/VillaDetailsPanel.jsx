@@ -3,6 +3,7 @@ import { villasApi } from "../../api/villas.js";
 import { constructionItemsApi } from "../../api/constructionItems.js";
 import { ConstructionItemSelect } from "./ConstructionItemSelect.jsx";
 import { ActivityStatusControl } from "./ActivityStatusControl.jsx";
+import { InvoiceStatusControl } from "./InvoiceStatusControl.jsx";
 import { PlannedDatesDisplay } from "./PlannedDatesDisplay.jsx";
 import { FileStatusSection } from "./FileStatusSection.jsx";
 import { useVillaGeoMeta } from "../../hooks/useVillaGeoMeta.js";
@@ -122,6 +123,8 @@ export function VillaDetailsPanel({ villaID, onClose, initialConstructionItem = 
               }
             />
           )}
+
+          {selectedItem && <InvoiceStatusControl villaID={villaID} tableItemId={selectedItem.TableItemID} />}
 
           {selectedItem && (
             <button

@@ -51,6 +51,7 @@ const EXPORT_LABEL_MIN_HEIGHT_PX = 2;
 export function VillaLayer({
   geojson,
   itemStatusLookup = null,
+  colorPalette = ITEM_STATUS_COLORS,
   filteredVillaIDs = null,
   highlightVillaIDs = null,
   statusHighlight = null,
@@ -84,7 +85,7 @@ export function VillaLayer({
       if (itemStatusLookup) {
         itemStatus = itemStatusLookup[villaID] ?? "NotStarted";
         base = {
-          fillColor: ITEM_STATUS_COLORS[itemStatus] ?? ITEM_STATUS_COLORS.NotStarted,
+          fillColor: colorPalette[itemStatus] ?? colorPalette.NotStarted,
           fillOpacity: 0.75,
         };
       } else {
@@ -115,7 +116,7 @@ export function VillaLayer({
         weight: isHighlighted ? 3 : 1,
       };
     },
-    [itemStatusLookup, filteredVillaIDs, highlightVillaIDs, statusHighlight]
+    [itemStatusLookup, filteredVillaIDs, highlightVillaIDs, statusHighlight, colorPalette]
   );
 
   // Restyle in place whenever the style function changes, instead of

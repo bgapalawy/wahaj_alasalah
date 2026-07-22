@@ -2,6 +2,7 @@ import { UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { ddb, tables } from "../config/aws.js";
 import { constructionItems } from "../data/constructionItems.js";
 import { getVillaWideItem, getManyVillaWideItems } from "./wideTableService.js";
+import { autoUpdateInvoiceOnCompletion } from "./invoiceService.js";
 
 /**
  * Tracks per-villa, per-construction-item status + completion date, now
@@ -68,7 +69,25 @@ export async function getAllActivityStatuses(villaID) {
  * whether one table name is misconfigured, so a broken table doesn't
  * silently swallow a write to the other.
  */
+/**
+ * Saves a status change to BOTH tables: the plain-string status in
+ * wajhaData (authoritative for reads), and the nested
+ * {status, completedDate} entry in Actual_dates (authoritative for
+ * completion-date tracking). Both writes are attempted regardless of
+ * whether one table name is misconfigured, so a broken table doesn't
+ * silently swallow a write to the other.
+ *
+ * Also ports the original app's invoice auto-trigger: reads the
+ * PREVIOUS status first, and if this change transitions the activity
+ * INTO "Completed" from something else, automatically marks its invoice
+ * "ReadyToPay" (see invoiceService.autoUpdateInvoiceOnCompletion). This
+ * read-before-write is the only way to know it's a transition rather
+ * than an already-Completed item being re-saved.
+ */
 export async function updateActivityStatus(villaID, tableItemId, { status, completedDate }) {
+  const previousStatusItem = await getVillaWideItem(tables.wajhaData, villaID).catch(() => ({}));
+  const previousStatus = previousStatusItem[tableItemId] ?? "NotStarted";
+
   const writeStatus = ddb
     .send(
       new UpdateCommand({
@@ -116,6 +135,15 @@ export async function updateActivityStatus(villaID, tableItemId, { status, compl
     const err = new Error("Could not save status to either table — check backend logs for table name issues.");
     err.status = 500;
     throw err;
+  }
+
+  if (statusResult) {
+    await autoUpdateInvoiceOnCompletion(villaID, tableItemId, previousStatus, status).catch((err) => {
+      // Don't fail the whole status save just because the invoice
+      // auto-update failed — the activity status itself already saved
+      // successfully, and this is a secondary side-effect.
+      console.error(`Could not auto-update invoice status: ${err.message}`);
+    });
   }
 
   return {

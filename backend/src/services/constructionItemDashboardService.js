@@ -16,15 +16,23 @@ export async function getConstructionItemDashboardData(tableItemId) {
   const villas = await scanValidVillas();
   const villaIDs = villas.map((v) => v.villaID).filter(Boolean);
 
-  const [plannedCostsByVilla, actualCostsByVilla, plannedStartByVilla, plannedFinishByVilla, statusByVilla, dateByVilla] =
-    await Promise.all([
-      getManyVillaWideItems(tables.plannedCosts, villaIDs),
-      getManyVillaWideItems(tables.actualCosts, villaIDs),
-      getManyVillaWideItems(tables.plannedDates, villaIDs),
-      getManyVillaWideItems(tables.plannedDatesFinish, villaIDs),
-      getManyVillaWideItems(tables.wajhaData, villaIDs),
-      getManyVillaWideItems(tables.actualDates, villaIDs),
-    ]);
+  const [
+    plannedCostsByVilla,
+    actualCostsByVilla,
+    plannedStartByVilla,
+    plannedFinishByVilla,
+    statusByVilla,
+    dateByVilla,
+    invoiceByVilla,
+  ] = await Promise.all([
+    getManyVillaWideItems(tables.plannedCosts, villaIDs),
+    getManyVillaWideItems(tables.actualCosts, villaIDs),
+    getManyVillaWideItems(tables.plannedDates, villaIDs),
+    getManyVillaWideItems(tables.plannedDatesFinish, villaIDs),
+    getManyVillaWideItems(tables.wajhaData, villaIDs),
+    getManyVillaWideItems(tables.actualDates, villaIDs),
+    getManyVillaWideItems(tables.invoices, villaIDs),
+  ]);
 
   return villas.map((villa) => ({
     villaID: villa.villaID,
@@ -36,5 +44,6 @@ export async function getConstructionItemDashboardData(tableItemId) {
     plannedFinishDate: toDateString(plannedFinishByVilla[villa.villaID]?.[tableItemId]),
     actualStatus: statusByVilla[villa.villaID]?.[tableItemId] ?? "NotStarted",
     actualCompletedDate: dateByVilla[villa.villaID]?.[tableItemId]?.completedDate ?? null,
+    invoiceStatus: invoiceByVilla[villa.villaID]?.[tableItemId] ?? "NotStarted",
   }));
 }

@@ -4,26 +4,44 @@ import { Pie } from "react-chartjs-2";
 import * as XLSX from "xlsx";
 import { dashboardApi } from "../../api/dashboard.js";
 import { calculateDashboardMetrics, getProjectDateRange, formatCurrency } from "../../utils/dashboardUtils.js";
+import { computeScheduleStatus } from "../../utils/scheduleUtils.js";
 import { ConstructionItemSelect } from "../panels/ConstructionItemSelect.jsx";
-import { ITEM_STATUS_COLORS as STATUS_COLORS, ITEM_STATUS_ORDER as STATUS_ORDER } from "../../config/itemStatusColors.js";
+import { ITEM_STATUS_COLORS, ITEM_STATUS_ORDER } from "../../config/itemStatusColors.js";
+import { SCHEDULE_STATUS_COLORS, SCHEDULE_STATUS_ORDER, INVOICE_STATUS_COLORS, INVOICE_STATUS_ORDER } from "../../config/scheduleInvoiceColors.js";
 import { useVillaGeoMeta } from "../../hooks/useVillaGeoMeta.js";
+import { useAllVillaStatuses } from "../../hooks/useAllVillaStatuses.js";
+import { constructionItemsApi } from "../../api/constructionItems.js";
 
 ChartJS.register(ArcElement, Tooltip, Legend);
 
+const COLOR_MODES = [
+  { id: "status", label: "Status" },
+  { id: "schedule", label: "Schedule" },
+  { id: "invoice", label: "Invoice" },
+];
+
 /**
- * Replaces the "monitoring type 1" flow from dashboardconstructionitem.js /
- * constructionItemsContainer.js: pick one construction item, see how many
- * villas are at each status for it, plus planned/actual value and
- * timeline dates across all villas for that one item.
+ * Replaces the "monitoring type 1/2/3" flows from
+ * dashboardconstructionitem.js: pick one construction item, see its
+ * breakdown across all villas — now under any of the three lenses the
+ * map's "Color map by item" control also has: Status, Schedule
+ * (date + dependency-graph readiness), or Invoice (billing status).
  */
 export function ConstructionItemDashboard() {
   const [selectedItem, setSelectedItem] = useState(null);
   const [rows, setRows] = useState([]);
   const [status, setStatus] = useState("idle"); // idle | loading | success | error
   const [analysisDate, setAnalysisDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [colorMode, setColorMode] = useState("status");
   const [sortKey, setSortKey] = useState("villaID");
   const [sortDir, setSortDir] = useState("asc");
   const { villaMetaByID } = useVillaGeoMeta();
+  const { data: allVillaStatuses } = useAllVillaStatuses(colorMode === "schedule");
+  const [constructionItemsTemplate, setConstructionItemsTemplate] = useState([]);
+
+  useEffect(() => {
+    constructionItemsApi.list().then(setConstructionItemsTemplate).catch(() => setConstructionItemsTemplate([]));
+  }, []);
 
   useEffect(() => {
     if (!selectedItem) return;
@@ -55,18 +73,60 @@ export function ConstructionItemDashboard() {
       plannedStartDate: null,
       plannedFinishDate: null,
       actualStatus: "NotStarted",
+      invoiceStatus: "NotStarted",
       actualCompletedDate: null,
     }));
     return [...knownRows, ...synthesized];
   }, [rows, villaMetaByID]);
 
+  // Schedule status is computed client-side per villa, reusing the exact
+  // same dependency-graph logic as the map's Schedule mode — needs each
+  // villa's FULL status map (for predecessor checks) and the item
+  // template (for the predecessor chain itself).
+  const scheduleStatusByVilla = useMemo(() => {
+    if (colorMode !== "schedule" || !selectedItem || !allVillaStatuses || constructionItemsTemplate.length === 0) {
+      return null;
+    }
+    const cutoff = new Date(`${analysisDate}T00:00:00`);
+    const lookup = {};
+    enrichedRows.forEach((r) => {
+      lookup[r.villaID] = computeScheduleStatus({
+        targetTableItemId: selectedItem.TableItemID,
+        targetActualStatus: r.actualStatus,
+        targetPlannedStartDate: r.plannedStartDate,
+        cutoffDate: cutoff,
+        allActivitiesTemplate: constructionItemsTemplate,
+        villaStatusMap: allVillaStatuses[r.villaID] ?? {},
+      });
+    });
+    return lookup;
+  }, [colorMode, selectedItem, allVillaStatuses, constructionItemsTemplate, enrichedRows, analysisDate]);
+
+  // Which field each row's "current status" comes from, for whichever
+  // mode is active — everything else (pie, table column, counts) just
+  // reads this one derived value instead of branching everywhere.
+  const rowsWithDisplayStatus = useMemo(() => {
+    return enrichedRows.map((r) => ({
+      ...r,
+      displayStatus:
+        colorMode === "invoice"
+          ? r.invoiceStatus
+          : colorMode === "schedule"
+            ? (scheduleStatusByVilla?.[r.villaID] ?? "NotStarted")
+            : r.actualStatus,
+    }));
+  }, [enrichedRows, colorMode, scheduleStatusByVilla]);
+
+  const statusColors = colorMode === "invoice" ? INVOICE_STATUS_COLORS : colorMode === "schedule" ? SCHEDULE_STATUS_COLORS : ITEM_STATUS_COLORS;
+  const statusOrder = colorMode === "invoice" ? INVOICE_STATUS_ORDER : colorMode === "schedule" ? SCHEDULE_STATUS_ORDER : ITEM_STATUS_ORDER;
+
   const statusCounts = useMemo(() => {
     const counts = {};
-    enrichedRows.forEach((r) => {
-      counts[r.actualStatus] = (counts[r.actualStatus] ?? 0) + 1;
+    rowsWithDisplayStatus.forEach((r) => {
+      counts[r.displayStatus] = (counts[r.displayStatus] ?? 0) + 1;
     });
     return counts;
-  }, [enrichedRows]);
+  }, [rowsWithDisplayStatus]);
 
   const metrics = useMemo(() => {
     const date = new Date(`${analysisDate}T00:00:00`);
@@ -76,14 +136,14 @@ export function ConstructionItemDashboard() {
   const dateSummary = useMemo(() => getProjectDateRange(enrichedRows), [enrichedRows]);
 
   const sortedRows = useMemo(() => {
-    return [...enrichedRows].sort((a, b) => {
+    return [...rowsWithDisplayStatus].sort((a, b) => {
       const dir = sortDir === "asc" ? 1 : -1;
       const av = a[sortKey] ?? "";
       const bv = b[sortKey] ?? "";
       if (typeof av === "string") return av.localeCompare(bv) * dir;
       return (av - bv) * dir;
     });
-  }, [enrichedRows, sortKey, sortDir]);
+  }, [rowsWithDisplayStatus, sortKey, sortDir]);
 
   function toggleSort(key) {
     if (sortKey === key) {
@@ -99,6 +159,8 @@ export function ConstructionItemDashboard() {
       Villa: r.villaID,
       Block: r.blocknum ?? "—",
       Status: r.actualStatus,
+      Schedule: colorMode === "schedule" ? r.displayStatus : "—",
+      Invoice: r.invoiceStatus,
       "Planned Cost": r.plannedCost,
       "Actual Cost": r.actualCost,
       "Planned Finish": r.plannedFinishDate ?? "—",
@@ -116,6 +178,21 @@ export function ConstructionItemDashboard() {
       <p className="file-status-hint" style={{ marginTop: "-0.5rem" }}>
         This view is independent of the filters above — it always covers every villa for the selected item.
       </p>
+
+      {selectedItem && (
+        <div className="map-color-mode-row" style={{ maxWidth: 320, marginTop: "0.5rem" }}>
+          {COLOR_MODES.map((m) => (
+            <button
+              key={m.id}
+              type="button"
+              className={`map-color-mode-btn ${colorMode === m.id ? "is-active" : ""}`}
+              onClick={() => setColorMode(m.id)}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+      )}
 
       {!selectedItem && <p className="file-status-hint">Select a construction item to see its progress across all villas.</p>}
 
@@ -157,7 +234,7 @@ export function ConstructionItemDashboard() {
             </h4>
             <div className="dashboard-controls" style={{ marginBottom: "0.5rem" }}>
               <label>
-                Analysis date
+                Analysis date {colorMode === "schedule" && "(also the Schedule cutoff date)"}
                 <input type="date" value={analysisDate} onChange={(e) => setAnalysisDate(e.target.value)} />
               </label>
             </div>
@@ -201,14 +278,16 @@ export function ConstructionItemDashboard() {
 
           <div className="dashboard-pies">
             <div className="dashboard-pie" style={{ width: 220 }}>
-              <h4>Villas by Status — {selectedItem.name}</h4>
+              <h4>
+                Villas by {COLOR_MODES.find((m) => m.id === colorMode).label} — {selectedItem.name}
+              </h4>
               <Pie
                 data={{
-                  labels: STATUS_ORDER,
+                  labels: statusOrder,
                   datasets: [
                     {
-                      data: STATUS_ORDER.map((s) => statusCounts[s] ?? 0),
-                      backgroundColor: STATUS_ORDER.map((s) => STATUS_COLORS[s]),
+                      data: statusOrder.map((s) => statusCounts[s] ?? 0),
+                      backgroundColor: statusOrder.map((s) => statusColors[s]),
                       borderColor: "#d1d5db",
                       borderWidth: 1,
                     },
@@ -232,7 +311,7 @@ export function ConstructionItemDashboard() {
                   {[
                     ["villaID", "Villa"],
                     ["blocknum", "Block"],
-                    ["actualStatus", "Status"],
+                    ["displayStatus", COLOR_MODES.find((m) => m.id === colorMode).label],
                     ["plannedCost", "Planned Cost"],
                     ["actualCost", "Actual Cost"],
                     ["plannedFinishDate", "Planned Finish"],
@@ -249,7 +328,7 @@ export function ConstructionItemDashboard() {
                   <tr key={r.villaID}>
                     <td>{r.villaID}</td>
                     <td>{r.blocknum ?? "—"}</td>
-                    <td>{r.actualStatus}</td>
+                    <td>{r.displayStatus}</td>
                     <td>{formatCurrency(r.plannedCost)}</td>
                     <td>{formatCurrency(r.actualCost)}</td>
                     <td>{r.plannedFinishDate ?? "—"}</td>

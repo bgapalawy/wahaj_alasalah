@@ -5,11 +5,12 @@ import { ACTIVITY_STATUS_OPTIONS } from "../../config/fileStatusConfig.js";
 const STATUS_OPTIONS = ACTIVITY_STATUS_OPTIONS; // NotStarted/NCR/Notes/Rejected/Completed — no Approval
 
 /**
- * New feature (not a port of anything in the original app): lets you set
- * an activity's status for a specific villa, with a completion date when
- * marking it Completed. Writes to the same table your notes mention
- * (ActualDatesTable) — see the schema assumption documented in
- * backend/src/services/activityStatusService.js.
+ * Lets you set an activity's status for a specific villa, with a
+ * completion date when marking it Completed. Writes to wajhaData +
+ * Actual_dates (see activityStatusService.js), and — matching the
+ * original app — auto-marks the invoice "ReadyToPay" when transitioning
+ * into Completed. If you're un-completing something whose invoice was
+ * already "Paid," this warns before saving, same as the original.
  */
 export function ActivityStatusControl({ villaID, tableItemId, onSaved }) {
   const [current, setCurrent] = useState(null);
@@ -41,6 +42,26 @@ export function ActivityStatusControl({ villaID, tableItemId, onSaved }) {
   }, [villaID, tableItemId]);
 
   async function handleSave() {
+    // Matches the original app: warn before un-completing an activity
+    // whose invoice was already marked "Paid" — reverting it silently
+    // would be a real financial side-effect, not something to do without
+    // a heads-up.
+    if (current?.status === "Completed" && draftStatus !== "Completed") {
+      try {
+        const invoice = await villasApi.getInvoiceStatus(villaID, tableItemId);
+        if (invoice.status === "Paid") {
+          const confirmed = window.confirm(
+            `This item was previously Completed and its invoice is already marked "Paid". ` +
+              `Changing its status won't automatically revert the invoice, but you may want to review it. Continue?`
+          );
+          if (!confirmed) return;
+        }
+      } catch {
+        // If the invoice check itself fails, don't block the save on it —
+        // just proceed without the warning.
+      }
+    }
+
     setState("saving");
     setErrorMessage(null);
     try {

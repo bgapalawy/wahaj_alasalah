@@ -28,6 +28,10 @@ export const tables = {
   // completedDate tracking; wajhaData is now the source of truth for
   // *current status* everywhere (villa status, map coloring, dashboards).
   wajhaData: process.env.DDB_WAJHA_DATA_TABLE,
+  // Invoice status per villa/item — same plain-string wide-table shape as
+  // wajhaData, e.g. { villaID, "Civil-1": "ReadyToPay", ... }. Confirmed
+  // to already exist in the real AWS account.
+  invoices: process.env.DDB_INVOICE_TABLE,
 };
 
 export const s3Bucket = process.env.S3_BUCKET_NAME;

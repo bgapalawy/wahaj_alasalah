@@ -2,6 +2,7 @@ import { Router } from "express";
 import { listVillas, getVillaById, updateVilla } from "../services/villaService.js";
 import { getActivityStatus, updateActivityStatus, getAllActivityStatuses } from "../services/activityStatusService.js";
 import { getVillaDashboardData, getPlannedDatesForItem } from "../services/villaDashboardService.js";
+import { getInvoiceStatus, getAllInvoiceStatuses, updateInvoiceStatus } from "../services/invoiceService.js";
 
 export const villasRouter = Router();
 
@@ -86,6 +87,36 @@ villasRouter.patch("/:villaID/activities/:tableItemId", async (req, res, next) =
       completedDate,
     });
     res.json(updated);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// All invoice statuses for a villa (all construction items) in one call.
+villasRouter.get("/:villaID/invoices", async (req, res, next) => {
+  try {
+    const statuses = await getAllInvoiceStatuses(req.params.villaID);
+    res.json(statuses);
+  } catch (err) {
+    next(err);
+  }
+});
+
+villasRouter.get("/:villaID/invoices/:tableItemId", async (req, res, next) => {
+  try {
+    const status = await getInvoiceStatus(req.params.villaID, req.params.tableItemId);
+    res.json({ status });
+  } catch (err) {
+    next(err);
+  }
+});
+
+villasRouter.patch("/:villaID/invoices/:tableItemId", async (req, res, next) => {
+  try {
+    const { status } = req.body;
+    if (!status) return res.status(400).json({ error: "status is required" });
+    const updated = await updateInvoiceStatus(req.params.villaID, req.params.tableItemId, status);
+    res.json({ status: updated });
   } catch (err) {
     next(err);
   }

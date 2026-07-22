@@ -6,8 +6,13 @@ import { BoundaryLayer } from "./BoundaryLayer.jsx";
 import { MapPanControl } from "./MapPanControl.jsx";
 import { MapItemColorControl } from "./MapItemColorControl.jsx";
 import { MAP_DEFAULTS, GEOJSON_URL, BOUNDARY_GEOJSON_URL } from "../../config/mapConfig.js";
-import { useConstructionItemStatus } from "../../hooks/useConstructionItemStatus.js";
+import { useConstructionItemData } from "../../hooks/useConstructionItemData.js";
+import { useAllVillaStatuses } from "../../hooks/useAllVillaStatuses.js";
 import { renderPrintableMap } from "../../utils/renderPrintableMap.js";
+import { computeScheduleStatus } from "../../utils/scheduleUtils.js";
+import { constructionItemsApi } from "../../api/constructionItems.js";
+import { ITEM_STATUS_COLORS, ITEM_STATUS_ORDER } from "../../config/itemStatusColors.js";
+import { SCHEDULE_STATUS_COLORS, SCHEDULE_STATUS_ORDER, INVOICE_STATUS_COLORS, INVOICE_STATUS_ORDER } from "../../config/scheduleInvoiceColors.js";
 
 // Fits the map to the loaded geometry's bounds instead of relying on a
 // hardcoded setView(). This is the fix that resolved the earlier
@@ -41,6 +46,9 @@ export const MapView = forwardRef(function MapView({ onVillaClick, colorByItem, 
   const [highlightBlocks, setHighlightBlocks] = useState([]);
   const [highlightZones, setHighlightZones] = useState([]);
   const [showBoundary, setShowBoundary] = useState(false);
+  const [colorMode, setColorMode] = useState("status"); // status | schedule | invoice
+  const [cutoffDate, setCutoffDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [constructionItemsTemplate, setConstructionItemsTemplate] = useState([]);
   // Click a status in the legend to spotlight only that status on the
   // map — visual only, multi-select (Set for fast lookup in the style
   // function, which runs per-parcel).
@@ -58,9 +66,58 @@ export const MapView = forwardRef(function MapView({ onVillaClick, colorByItem, 
   function clearStatusHighlight() {
     setStatusHighlight(new Set());
   }
+
+  // Clear the status spotlight when switching modes — a status from one
+  // mode's vocabulary ("ready"/"blocked") wouldn't mean anything spotlit
+  // against a different mode's colors.
+  useEffect(() => {
+    clearStatusHighlight();
+  }, [colorMode]);
+
   const [forceAllLabels, setForceAllLabels] = useState(false);
   const mapInstanceRef = useRef(null);
   const savedViewRef = useRef(null);
+
+  useEffect(() => {
+    constructionItemsApi.list().then(setConstructionItemsTemplate).catch(() => setConstructionItemsTemplate([]));
+  }, []);
+
+  // One fetch per selected item, covering Status and Invoice modes.
+  const { rows: itemRows, statusLookup, invoiceLookup, status: itemDataLoadStatus } = useConstructionItemData(
+    colorByItem?.TableItemID ?? null
+  );
+
+  // Schedule mode needs every villa's FULL status map too (to check
+  // predecessor completion via the dependency graph) — fetched once,
+  // independent of which item is selected, only when actually needed.
+  const { data: allVillaStatuses, status: allVillaStatusesLoadStatus } = useAllVillaStatuses(colorMode === "schedule");
+
+  const scheduleLookup = useMemo(() => {
+    if (colorMode !== "schedule" || !itemRows || !allVillaStatuses || constructionItemsTemplate.length === 0 || !colorByItem) {
+      return null;
+    }
+    const cutoff = new Date(`${cutoffDate}T00:00:00`);
+    const lookup = {};
+    itemRows.forEach((r) => {
+      lookup[r.villaID] = computeScheduleStatus({
+        targetTableItemId: colorByItem.TableItemID,
+        targetActualStatus: r.actualStatus,
+        targetPlannedStartDate: r.plannedStartDate,
+        cutoffDate: cutoff,
+        allActivitiesTemplate: constructionItemsTemplate,
+        villaStatusMap: allVillaStatuses[r.villaID] ?? {},
+      });
+    });
+    return lookup;
+  }, [colorMode, itemRows, allVillaStatuses, constructionItemsTemplate, colorByItem, cutoffDate]);
+
+  const itemStatusLookup = colorMode === "status" ? statusLookup : colorMode === "invoice" ? invoiceLookup : scheduleLookup;
+  const activeColors = colorMode === "status" ? ITEM_STATUS_COLORS : colorMode === "invoice" ? INVOICE_STATUS_COLORS : SCHEDULE_STATUS_COLORS;
+  const activeOrder = colorMode === "status" ? ITEM_STATUS_ORDER : colorMode === "invoice" ? INVOICE_STATUS_ORDER : SCHEDULE_STATUS_ORDER;
+  const isLoading =
+    colorMode === "schedule"
+      ? itemDataLoadStatus === "loading" || allVillaStatusesLoadStatus === "loading" || (!!colorByItem && !scheduleLookup)
+      : itemDataLoadStatus === "loading";
 
   // Exposed to App.jsx so "Download PDF" can zoom out to fit BOTH the
   // villa parcels and the project boundary together, force every villa
@@ -118,10 +175,12 @@ export const MapView = forwardRef(function MapView({ onVillaClick, colorByItem, 
         geojson,
         boundaryGeojson,
         itemStatusLookup,
+        colorPalette: activeColors,
+        statusOrder: activeOrder,
         filteredVillaIDs,
         highlightVillaIDs,
         titleText: "Sahms ElGhroub — Site Map",
-        subtitleText: colorByItem ? `Colored by: ${colorByItem.name}` : undefined,
+        subtitleText: colorByItem ? `Colored by: ${colorByItem.name} (${colorMode})` : undefined,
       });
     },
   }));
@@ -257,10 +316,6 @@ export const MapView = forwardRef(function MapView({ onVillaClick, colorByItem, 
     .filter(Boolean)
     .join(" / ");
 
-  const { lookup: itemStatusLookup, status: itemStatusLoadStatus } = useConstructionItemStatus(
-    colorByItem?.TableItemID ?? null
-  );
-
   // Counts against every real villa in the GeoJSON (villaMetaByID), not
   // just the ones the backend has data for — your DB currently only has
   // ~590 of the ~1540 real villas populated. A villa missing from
@@ -330,6 +385,7 @@ export const MapView = forwardRef(function MapView({ onVillaClick, colorByItem, 
         <VillaLayer
           geojson={geojson}
           itemStatusLookup={itemStatusLookup}
+          colorPalette={activeColors}
           filteredVillaIDs={filteredVillaIDs}
           highlightVillaIDs={highlightVillaIDs}
           statusHighlight={statusHighlight}
@@ -355,8 +411,14 @@ export const MapView = forwardRef(function MapView({ onVillaClick, colorByItem, 
       <MapItemColorControl
         selectedItem={colorByItem}
         onChange={onColorByItemChange}
-        loading={itemStatusLoadStatus === "loading"}
+        colorMode={colorMode}
+        onColorModeChange={setColorMode}
+        cutoffDate={cutoffDate}
+        onCutoffDateChange={setCutoffDate}
+        loading={isLoading}
         statusCounts={statusCounts}
+        statusColors={activeColors}
+        statusOrder={activeOrder}
         remainingCount={remainingCount}
         totalProjectVillas={Object.keys(villaMetaByID).length}
         blockOptions={blockOptions}

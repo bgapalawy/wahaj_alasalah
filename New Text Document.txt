@@ -1,7 +1,9 @@
 npm run dev
 
-cd alsaeed-system\backend
-cd alsaeed-system\frontend-new
+
+
+cd backend
+cd frontend
 
 Great progress! Here's what I recommend doing next in order:
 

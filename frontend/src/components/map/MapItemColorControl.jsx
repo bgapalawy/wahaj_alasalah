@@ -6,10 +6,20 @@ import { LoadingRing } from "../common/LoadingRing.jsx";
 import { MultiSelect } from "../dashboard/MultiSelect.jsx";
 import { useDraggable } from "../../hooks/useDraggable.js";
 
+const COLOR_MODES = [
+  { id: "status", label: "Status" },
+  { id: "schedule", label: "Schedule" },
+  { id: "invoice", label: "Invoice" },
+];
+
 /**
  * Replaces the original app's coloringvillas() feature: pick a
  * construction item and every villa on the map recolors to that item's
- * status for that villa, instead of the villa's overall status.
+ * status for that villa, instead of the villa's overall status. Now
+ * three modes (matching the original's "monitoring type" concept):
+ *   - Status:   the item's actual progress status
+ *   - Schedule: is it on track given its planned date + dependencies
+ *   - Invoice:  its billing status (NotStarted/ReadyToPay/Paid)
  *
  * Also covers:
  *  - block/zone/villa/type multi-select filtering (muted, not excluded)
@@ -21,8 +31,14 @@ import { useDraggable } from "../../hooks/useDraggable.js";
 export function MapItemColorControl({
   selectedItem,
   onChange,
+  colorMode = "status",
+  onColorModeChange,
+  cutoffDate,
+  onCutoffDateChange,
   loading,
   statusCounts = {},
+  statusColors = ITEM_STATUS_COLORS,
+  statusOrder = ITEM_STATUS_ORDER,
   remainingCount = null,
   totalProjectVillas = null,
   statusHighlight = null,
@@ -75,7 +91,27 @@ export function MapItemColorControl({
 
       {!collapsed && (
         <>
+          <div className="map-color-mode-row">
+            {COLOR_MODES.map((m) => (
+              <button
+                key={m.id}
+                type="button"
+                className={`map-color-mode-btn ${colorMode === m.id ? "is-active" : ""}`}
+                onClick={() => onColorModeChange?.(m.id)}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+
           <ConstructionItemSelect value={selectedItem} onChange={onChange} />
+
+          {colorMode === "schedule" && (
+            <label className="map-cutoff-date-field">
+              Cutoff date (is it due yet?)
+              <input type="date" value={cutoffDate} onChange={(e) => onCutoffDateChange?.(e.target.value)} />
+            </label>
+          )}
 
           {selectedItem &&
             (blockOptions.length > 0 || zoneOptions.length > 0 || villaOptions.length > 0 || villaTypeOptions.length > 0) && (
@@ -158,11 +194,9 @@ export function MapItemColorControl({
           {!loading && selectedItem && (
             <div className="map-item-color-legend">
               <div className="map-item-color-legend-with-chart">
-                <StatusDonut
-                  segments={ITEM_STATUS_ORDER.map((s) => ({ value: statusCounts[s] ?? 0, color: ITEM_STATUS_COLORS[s] }))}
-                />
+                <StatusDonut segments={statusOrder.map((s) => ({ value: statusCounts[s] ?? 0, color: statusColors[s] }))} />
                 <div className="map-item-color-legend-rows">
-                  {ITEM_STATUS_ORDER.map((s) => {
+                  {statusOrder.map((s) => {
                     const count = statusCounts[s] ?? 0;
                     const percent = total > 0 ? (count / total) * 100 : 0;
                     const isActive = statusHighlight && statusHighlight.has(s);
@@ -174,7 +208,7 @@ export function MapItemColorControl({
                         onClick={() => onToggleStatusHighlight?.(s)}
                         title="Click to spotlight this status on the map (doesn't change any counts)"
                       >
-                        <span className="legend-swatch" style={{ backgroundColor: ITEM_STATUS_COLORS[s] }} />
+                        <span className="legend-swatch" style={{ backgroundColor: statusColors[s] }} />
                         {s}
                         <span className="map-item-color-count">
                           {count} <span className="map-item-color-percent">({percent.toFixed(0)}%)</span>

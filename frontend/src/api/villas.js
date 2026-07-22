@@ -16,4 +16,10 @@ export const villasApi = {
       status,
       completedDate,
     }),
+
+  getInvoiceStatus: (villaID, tableItemId) =>
+    apiClient.get(`/villas/${villaID}/invoices/${encodeURIComponent(tableItemId)}`),
+  getAllInvoiceStatuses: (villaID) => apiClient.get(`/villas/${villaID}/invoices`),
+  updateInvoiceStatus: (villaID, tableItemId, status) =>
+    apiClient.patch(`/villas/${villaID}/invoices/${encodeURIComponent(tableItemId)}`, { status }),
 };

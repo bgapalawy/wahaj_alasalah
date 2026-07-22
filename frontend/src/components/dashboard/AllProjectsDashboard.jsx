@@ -16,6 +16,7 @@ import { dashboardApi } from "../../api/dashboard.js";
 import { aggregateByPeriod, formatPeriodLabel, formatCurrency, downloadChartAsImage } from "../../utils/dashboardUtils.js";
 import { aggregateByCategory, aggregateTotalBudget, getTopItems, getFilteredDateSummary, formatSAR } from "../../utils/portfolioFilterUtils.js";
 import { VILLA_STATUS_COLORS } from "../../config/mapConfig.js";
+import { INVOICE_STATUS_COLORS, INVOICE_STATUS_ORDER } from "../../config/scheduleInvoiceColors.js";
 import { CATEGORY_COLOR_PALETTE } from "../../utils/graphUtils.js";
 import { FilterBar } from "./FilterBar.jsx";
 
@@ -218,6 +219,7 @@ export function AllProjectsDashboard() {
         plannedStartDate: null,
         plannedFinishDate: null,
         actualStatus: "NotStarted",
+        invoiceStatus: "NotStarted",
         actualCompletedDate: null,
       }));
     });
@@ -368,6 +370,21 @@ export function AllProjectsDashboard() {
     status: s,
     count: statusCounts[s] ?? 0,
     percent: statusTotal > 0 ? ((statusCounts[s] ?? 0) / statusTotal) * 100 : 0,
+  }));
+
+  // Item-level tally (not rolled up per villa the way overall status is —
+  // invoices are naturally per-activity, so "how many item-invoices are
+  // ReadyToPay" is the more useful number here than a villa-level rollup).
+  const invoiceCounts = {};
+  filteredRecords.forEach((r) => {
+    const inv = r.invoiceStatus ?? "NotStarted";
+    invoiceCounts[inv] = (invoiceCounts[inv] ?? 0) + 1;
+  });
+  const invoiceTotal = INVOICE_STATUS_ORDER.reduce((sum, s) => sum + (invoiceCounts[s] ?? 0), 0);
+  const invoiceTableRows = INVOICE_STATUS_ORDER.map((s) => ({
+    status: s,
+    count: invoiceCounts[s] ?? 0,
+    percent: invoiceTotal > 0 ? ((invoiceCounts[s] ?? 0) / invoiceTotal) * 100 : 0,
   }));
 
   // Every category row now carries BOTH the Total (whole filtered scope,
@@ -650,6 +667,64 @@ export function AllProjectsDashboard() {
                     </thead>
                     <tbody>
                       {statusTableRows.map((r) => (
+                        <tr key={r.status}>
+                          <td>{r.status}</td>
+                          <td>{r.count}</td>
+                          <td>{r.percent.toFixed(1)}%</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="dashboard-pies">
+                  <div className="dashboard-pie" style={{ width: 200 }}>
+                    <h4>Invoices by Status</h4>
+                    <Pie
+                      data={{
+                        labels: INVOICE_STATUS_ORDER,
+                        datasets: [
+                          {
+                            data: INVOICE_STATUS_ORDER.map((s) => invoiceCounts[s] ?? 0),
+                            backgroundColor: INVOICE_STATUS_ORDER.map((s) => INVOICE_STATUS_COLORS[s]),
+                            borderWidth: 0,
+                          },
+                        ],
+                      }}
+                      options={{ plugins: { legend: { position: "bottom", labels: { boxWidth: 10, font: { size: 10 } } } } }}
+                    />
+                  </div>
+                </div>
+
+                <div className="dashboard-chart-section">
+                  <div className="dashboard-chart-actions">
+                    <h4>Invoices by Status — detail</h4>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        downloadRowsAsExcel(
+                          invoiceTableRows.map((r) => ({ Status: r.status, Count: r.count, "% of Item-Invoices": r.percent.toFixed(1) })),
+                          "Invoices by Status",
+                          "invoices_by_status"
+                        )
+                      }
+                    >
+                      Download Table
+                    </button>
+                  </div>
+                  <p className="file-status-hint" style={{ marginTop: "-0.25rem" }}>
+                    Counted per activity (each item invoices separately), not rolled up per villa.
+                  </p>
+                  <table className="dashboard-table">
+                    <thead>
+                      <tr>
+                        <th>Status</th>
+                        <th>Count</th>
+                        <th>% of Item-Invoices</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {invoiceTableRows.map((r) => (
                         <tr key={r.status}>
                           <td>{r.status}</td>
                           <td>{r.count}</td>

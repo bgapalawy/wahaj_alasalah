@@ -37,15 +37,23 @@ export async function getAllProjectsDashboardData() {
   const villas = await scanValidVillas();
   const villaIDs = villas.map((v) => v.villaID).filter(Boolean);
 
-  const [plannedCostsByVilla, actualCostsByVilla, plannedStartByVilla, plannedFinishByVilla, statusByVilla, dateByVilla] =
-    await Promise.all([
-      getManyVillaWideItems(tables.plannedCosts, villaIDs),
-      getManyVillaWideItems(tables.actualCosts, villaIDs),
-      getManyVillaWideItems(tables.plannedDates, villaIDs),
-      getManyVillaWideItems(tables.plannedDatesFinish, villaIDs),
-      getManyVillaWideItems(tables.wajhaData, villaIDs), // real status, plain strings
-      getManyVillaWideItems(tables.actualDates, villaIDs), // completedDate only now
-    ]);
+  const [
+    plannedCostsByVilla,
+    actualCostsByVilla,
+    plannedStartByVilla,
+    plannedFinishByVilla,
+    statusByVilla,
+    dateByVilla,
+    invoiceByVilla,
+  ] = await Promise.all([
+    getManyVillaWideItems(tables.plannedCosts, villaIDs),
+    getManyVillaWideItems(tables.actualCosts, villaIDs),
+    getManyVillaWideItems(tables.plannedDates, villaIDs),
+    getManyVillaWideItems(tables.plannedDatesFinish, villaIDs),
+    getManyVillaWideItems(tables.wajhaData, villaIDs), // real status, plain strings
+    getManyVillaWideItems(tables.actualDates, villaIDs), // completedDate only now
+    getManyVillaWideItems(tables.invoices, villaIDs),
+  ]);
 
   const categoryTotals = {}; // { Civil: { planned, actual }, ... }
   const records = [];
@@ -57,6 +65,7 @@ export async function getAllProjectsDashboardData() {
     const plannedFinishItem = plannedFinishByVilla[villa.villaID] ?? {};
     const statusItem = statusByVilla[villa.villaID] ?? {};
     const dateItem = dateByVilla[villa.villaID] ?? {};
+    const invoiceItem = invoiceByVilla[villa.villaID] ?? {};
 
     let plannedCost = 0;
     let actualCost = 0;
@@ -91,6 +100,7 @@ export async function getAllProjectsDashboardData() {
         plannedFinishDate: toDateString(plannedFinishItem[id]),
         actualStatus,
         actualCompletedDate,
+        invoiceStatus: invoiceItem[id] ?? "NotStarted",
       });
     });
 

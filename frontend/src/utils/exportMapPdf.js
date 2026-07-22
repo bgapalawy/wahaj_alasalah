@@ -23,14 +23,25 @@ export async function downloadMapAsPDF(targetElement, filename = "wajha-map") {
   const canvas = await html2canvas(targetElement, {
     useCORS: true,
     allowTaint: false,
-    scale: 3,
+    scale: 3, // Keeps the high resolution
     backgroundColor: "#f8fafc",
+    ignoreElements: (element) => {
+      // Prevents UI panels from rendering on top of the exported map
+      if (element?.classList) {
+        return (
+          element.classList.contains("map-item-color-control") ||
+          element.classList.contains("villa-panel") ||
+          element.classList.contains("map-pan-control") ||
+          element.classList.contains("leaflet-control-container") ||
+          element.classList.contains("app-header")
+        );
+      }
+      return false;
+    }
   });
 
   const imgData = canvas.toDataURL("image/png");
 
-  // Landscape, sized to match the capture's aspect ratio rather than a
-  // fixed page size, so the map doesn't get cropped or heavily letterboxed.
   const pdf = new jsPDF({
     orientation: canvas.width >= canvas.height ? "landscape" : "portrait",
     unit: "px",
