@@ -15,12 +15,16 @@ import * as XLSX from "xlsx";
 import { dashboardApi } from "../../api/dashboard.js";
 import { aggregateByPeriod, formatPeriodLabel, formatCurrency, downloadChartAsImage } from "../../utils/dashboardUtils.js";
 import { aggregateByCategory, aggregateTotalBudget, getTopItems, getFilteredDateSummary, formatSAR } from "../../utils/portfolioFilterUtils.js";
-import { VILLA_STATUS_COLORS } from "../../config/mapConfig.js";
-import { INVOICE_STATUS_COLORS, INVOICE_STATUS_ORDER, SCHEDULE_STATUS_COLORS, SCHEDULE_STATUS_ORDER } from "../../config/scheduleInvoiceColors.js";
+import { INVOICE_STATUS_ORDER, SCHEDULE_STATUS_ORDER } from "../../config/scheduleInvoiceColors.js";
 import { computeScheduleStatusFast } from "../../utils/scheduleUtils.js";
 import { useAllVillaStatuses } from "../../hooks/useAllVillaStatuses.js";
+import { useAllVillaInvoiceStatuses } from "../../hooks/useAllVillaInvoiceStatuses.js";
+import { useSpecialQueryData } from "../../hooks/useSpecialQueryData.js";
+import { evaluateCustomQuery } from "../../utils/customQueryUtils.js";
+import { CustomQueryBuilder } from "../shared/CustomQueryBuilder.jsx";
 import { constructionItemsApi } from "../../api/constructionItems.js";
 import { CATEGORY_COLOR_PALETTE } from "../../utils/graphUtils.js";
+import { useColorPreferences } from "../../contexts/ColorPreferencesContext.jsx";
 import { FilterBar } from "./FilterBar.jsx";
 
 // Draws the percent value directly on each pie slice — applied to the
@@ -131,6 +135,10 @@ function downloadRowsAsExcel(rows, sheetName, filename) {
  * risking a wrong port of unverified spreading logic.
  */
 export function AllProjectsDashboard() {
+  const { getColors } = useColorPreferences();
+  const overallStatusColors = getColors("overallStatus");
+  const resolvedInvoiceColors = getColors("invoice");
+  const resolvedScheduleColors = getColors("schedule");
   const [data, setData] = useState(null);
   const [status, setStatus] = useState("loading");
   const [filters, setFilters] = useState(null);
@@ -230,6 +238,31 @@ export function AllProjectsDashboard() {
     return [...withGeoMeta, ...synthesized];
   }, [data, villaMetaByID]);
 
+  // Custom query needs every villa's full status maps (actual + invoice)
+  // to evaluate conditions like "Civil-1 = Completed" — same data source
+  // as the Schedule breakdown and the map's Schedule mode, fetched once
+  // and shared. Moved before filteredRecords since the query result
+  // feeds into it.
+  const { data: allVillaStatuses } = useAllVillaStatuses(true);
+  const [customQueryConditions, setCustomQueryConditions] = useState([]);
+  const { data: allVillaInvoiceStatuses } = useAllVillaInvoiceStatuses(customQueryConditions.length > 0);
+  const {
+    columns: specialQueryColumns,
+    valuesByColumn: specialQueryValuesByColumn,
+    byVilla: specialQueryByVilla,
+  } = useSpecialQueryData(true);
+
+  const customQueryVillaIDs = useMemo(() => {
+    if (customQueryConditions.length === 0) return null;
+    if (!allVillaStatuses || !allVillaInvoiceStatuses) return null; // still loading
+    return evaluateCustomQuery(customQueryConditions, {
+      villaMetaByID,
+      allVillaStatuses,
+      allVillaInvoiceStatuses,
+      specialQueryByVilla,
+    });
+  }, [customQueryConditions, allVillaStatuses, allVillaInvoiceStatuses, villaMetaByID, specialQueryByVilla]);
+
   const filteredRecords = useMemo(() => {
     if (!data || !filters) return [];
     return enrichedRecords.filter((r) => {
@@ -239,14 +272,14 @@ export function AllProjectsDashboard() {
       if (filters.blocks.length > 0 && !filters.blocks.includes(r.blocknum)) return false;
       if (filters.zones && filters.zones.length > 0 && !filters.zones.includes(r.zonenum)) return false;
       if (filters.villaTypes && filters.villaTypes.length > 0 && !filters.villaTypes.includes(r.villatype)) return false;
+      if (customQueryVillaIDs && !customQueryVillaIDs.has(r.villaID)) return false;
       return true;
     });
-  }, [data, filters, enrichedRecords]);
+  }, [data, filters, enrichedRecords, customQueryVillaIDs]);
 
-  // Portfolio-wide Schedule breakdown — needs every villa's full status
-  // map (for predecessor checks) and the item template (predecessor
-  // chains), same data sources as the map/By Item tab's Schedule mode.
-  const { data: allVillaStatuses } = useAllVillaStatuses(true);
+  // Portfolio-wide Schedule breakdown — needs the item template
+  // (predecessor chains), same data sources as the map/By Item tab's
+  // Schedule mode.
   const [constructionItemsTemplate, setConstructionItemsTemplate] = useState([]);
   useEffect(() => {
     constructionItemsApi.list().then(setConstructionItemsTemplate).catch(() => setConstructionItemsTemplate([]));
@@ -482,6 +515,24 @@ export function AllProjectsDashboard() {
         }}
       />
 
+      <details className="custom-query-section" style={{ marginBottom: "var(--space-3)" }}>
+        <summary>
+          Custom query{" "}
+          {customQueryConditions.length > 0 && `(${customQueryConditions.length} condition${customQueryConditions.length === 1 ? "" : "s"})`}
+        </summary>
+        <p className="file-status-hint" style={{ marginTop: "0.4rem" }}>
+          Combine conditions across item status, invoice status, and villa attributes — e.g. "Civil-1 = Completed AND
+          Block = 5". Narrows every tab below on top of the filters above.
+        </p>
+        <CustomQueryBuilder
+          conditions={customQueryConditions}
+          onChange={setCustomQueryConditions}
+          villaMetaByID={villaMetaByID}
+          specialQueryColumns={specialQueryColumns}
+          specialQueryValuesByColumn={specialQueryValuesByColumn}
+        />
+      </details>
+
       <Tabs
         tabs={[
           {
@@ -598,7 +649,7 @@ export function AllProjectsDashboard() {
                         datasets: [
                           {
                             data: STATUS_ORDER.map((s) => statusCounts[s] ?? 0),
-                            backgroundColor: STATUS_ORDER.map((s) => VILLA_STATUS_COLORS[s]),
+                            backgroundColor: STATUS_ORDER.map((s) => overallStatusColors[s]),
                             borderWidth: 0,
                           },
                         ],
@@ -733,7 +784,7 @@ export function AllProjectsDashboard() {
                         datasets: [
                           {
                             data: INVOICE_STATUS_ORDER.map((s) => invoiceCounts[s] ?? 0),
-                            backgroundColor: INVOICE_STATUS_ORDER.map((s) => INVOICE_STATUS_COLORS[s]),
+                            backgroundColor: INVOICE_STATUS_ORDER.map((s) => resolvedInvoiceColors[s]),
                             borderWidth: 0,
                           },
                         ],
@@ -791,7 +842,7 @@ export function AllProjectsDashboard() {
                         datasets: [
                           {
                             data: SCHEDULE_STATUS_ORDER.map((s) => scheduleCounts[s] ?? 0),
-                            backgroundColor: SCHEDULE_STATUS_ORDER.map((s) => SCHEDULE_STATUS_COLORS[s]),
+                            backgroundColor: SCHEDULE_STATUS_ORDER.map((s) => resolvedScheduleColors[s]),
                             borderWidth: 0,
                           },
                         ],

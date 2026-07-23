@@ -6,11 +6,12 @@ import { dashboardApi } from "../../api/dashboard.js";
 import { calculateDashboardMetrics, getProjectDateRange, formatCurrency } from "../../utils/dashboardUtils.js";
 import { computeScheduleStatusFast } from "../../utils/scheduleUtils.js";
 import { ConstructionItemSelect } from "../panels/ConstructionItemSelect.jsx";
-import { ITEM_STATUS_COLORS, ITEM_STATUS_ORDER } from "../../config/itemStatusColors.js";
-import { SCHEDULE_STATUS_COLORS, SCHEDULE_STATUS_ORDER, INVOICE_STATUS_COLORS, INVOICE_STATUS_ORDER } from "../../config/scheduleInvoiceColors.js";
+import { ITEM_STATUS_ORDER } from "../../config/itemStatusColors.js";
+import { SCHEDULE_STATUS_ORDER, INVOICE_STATUS_ORDER } from "../../config/scheduleInvoiceColors.js";
 import { useVillaGeoMeta } from "../../hooks/useVillaGeoMeta.js";
 import { useAllVillaStatuses } from "../../hooks/useAllVillaStatuses.js";
 import { constructionItemsApi } from "../../api/constructionItems.js";
+import { useColorPreferences } from "../../contexts/ColorPreferencesContext.jsx";
 
 ChartJS.register(ArcElement, Tooltip, Legend);
 
@@ -127,7 +128,8 @@ export function ConstructionItemDashboard() {
     }));
   }, [enrichedRows, colorMode, scheduleStatusByVilla]);
 
-  const statusColors = colorMode === "invoice" ? INVOICE_STATUS_COLORS : colorMode === "schedule" ? SCHEDULE_STATUS_COLORS : ITEM_STATUS_COLORS;
+  const { getColors } = useColorPreferences();
+  const statusColors = getColors(colorMode === "invoice" ? "invoice" : colorMode === "schedule" ? "schedule" : "status");
   const statusOrder = colorMode === "invoice" ? INVOICE_STATUS_ORDER : colorMode === "schedule" ? SCHEDULE_STATUS_ORDER : ITEM_STATUS_ORDER;
 
   const statusCounts = useMemo(() => {

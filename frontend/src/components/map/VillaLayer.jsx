@@ -55,6 +55,8 @@ export function VillaLayer({
   filteredVillaIDs = null,
   highlightVillaIDs = null,
   statusHighlight = null,
+  customQueryVillaIDs = null,
+  customQueryColors = null,
   showLabels = true,
   forceAllLabels = false,
   onVillaClick,
@@ -68,6 +70,23 @@ export function VillaLayer({
       if (!villaID || villaID === "NOT_VILLA") return NOT_VILLA_STYLE;
 
       const isHighlighted = highlightVillaIDs && highlightVillaIDs.has(villaID);
+
+      // Custom query takes over the primary fill whenever it's active —
+      // matching villas get the "match" color, everything else gets
+      // "noMatch", regardless of what item/Status/Schedule/Invoice mode
+      // is selected. This is a deliberate override, not a blend: showing
+      // query results ON TOP of status colors would just be visual noise
+      // (two competing fills), and the point of running a query is to
+      // see exactly which villas satisfy it.
+      if (customQueryVillaIDs && customQueryColors) {
+        const isMatch = customQueryVillaIDs.has(villaID);
+        return {
+          color: isHighlighted ? HIGHLIGHT_COLOR : "#1f2937",
+          weight: isHighlighted ? 3 : 1,
+          fillColor: isMatch ? customQueryColors.match : customQueryColors.noMatch,
+          fillOpacity: isMatch ? 0.85 : 0.35,
+        };
+      }
 
       // Villa is outside the active filter — render muted instead of
       // excluded, matching the original app's coloringvillas() treatment.
@@ -116,7 +135,7 @@ export function VillaLayer({
         weight: isHighlighted ? 3 : 1,
       };
     },
-    [itemStatusLookup, filteredVillaIDs, highlightVillaIDs, statusHighlight, colorPalette]
+    [itemStatusLookup, filteredVillaIDs, highlightVillaIDs, statusHighlight, colorPalette, customQueryVillaIDs, customQueryColors]
   );
 
   // Restyle in place whenever the style function changes, instead of

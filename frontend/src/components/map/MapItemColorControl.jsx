@@ -5,11 +5,13 @@ import { StatusDonut } from "./StatusDonut.jsx";
 import { LoadingRing } from "../common/LoadingRing.jsx";
 import { MultiSelect } from "../dashboard/MultiSelect.jsx";
 import { useDraggable } from "../../hooks/useDraggable.js";
+import { CustomQueryBuilder } from "../shared/CustomQueryBuilder.jsx";
 
 const COLOR_MODES = [
   { id: "status", label: "Status" },
   { id: "schedule", label: "Schedule" },
   { id: "invoice", label: "Invoice" },
+  { id: "column", label: "Column" },
 ];
 
 /**
@@ -63,6 +65,20 @@ export function MapItemColorControl({
   onHighlightZonesChange,
   showBoundary,
   onShowBoundaryChange,
+  customQueryConditions = [],
+  onCustomQueryConditionsChange,
+  villaMetaByID = {},
+  specialQueryColumns = [],
+  specialQueryValuesByColumn = {},
+  customQueryColors = { match: "#2563eb", noMatch: "#d1d5db" },
+  selectedSpecialQueryColumn = "",
+  onSelectedSpecialQueryColumnChange,
+  distinctColumnValues = [],
+  selectedColumnValues = [],
+  onSelectedColumnValuesChange,
+  columnColors = {},
+  onSetColumnColor,
+  onResetColumnColors,
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const { handleRef, style: dragStyle } = useDraggable();
@@ -104,7 +120,30 @@ export function MapItemColorControl({
             ))}
           </div>
 
-          <ConstructionItemSelect value={selectedItem} onChange={onChange} />
+          {colorMode === "column" ? (
+            <div className="admin-field">
+              <label>Special query column</label>
+              <select value={selectedSpecialQueryColumn} onChange={(e) => onSelectedSpecialQueryColumnChange?.(e.target.value)}>
+                <option value="">— Select a column —</option>
+                {specialQueryColumns.map((col) => (
+                  <option key={col} value={col}>
+                    {col}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : (
+            <ConstructionItemSelect value={selectedItem} onChange={onChange} />
+          )}
+
+          {colorMode === "column" && selectedSpecialQueryColumn && (
+            <MultiSelect
+              label="Values"
+              options={distinctColumnValues}
+              value={selectedColumnValues}
+              onChange={onSelectedColumnValuesChange}
+            />
+          )}
 
           {colorMode === "schedule" && (
             <label className="map-cutoff-date-field">
@@ -167,6 +206,35 @@ export function MapItemColorControl({
             </div>
           )}
 
+          <details className="custom-query-section">
+            <summary>
+              Custom query {customQueryConditions.length > 0 && `(${customQueryConditions.length} condition${customQueryConditions.length === 1 ? "" : "s"})`}
+            </summary>
+            <p className="file-status-hint" style={{ marginTop: "0.4rem" }}>
+              Combine conditions across item status, invoice status, and villa attributes — e.g. "Civil-1 = Completed AND
+              Block = 5". Narrows the map on top of the filters above.
+            </p>
+            <CustomQueryBuilder
+              conditions={customQueryConditions}
+              onChange={onCustomQueryConditionsChange}
+              villaMetaByID={villaMetaByID}
+              specialQueryColumns={specialQueryColumns}
+              specialQueryValuesByColumn={specialQueryValuesByColumn}
+            />
+            {customQueryConditions.length > 0 && (
+              <div className="map-item-color-legend-rows" style={{ marginTop: "0.5rem" }}>
+                <span className="map-item-color-legend-row">
+                  <span className="legend-swatch" style={{ backgroundColor: customQueryColors.match }} />
+                  Matches the query
+                </span>
+                <span className="map-item-color-legend-row">
+                  <span className="legend-swatch" style={{ backgroundColor: customQueryColors.noMatch }} />
+                  Doesn't match
+                </span>
+              </div>
+            )}
+          </details>
+
           <label className="map-boundary-toggle">
             <input type="checkbox" checked={showBoundary} onChange={(e) => onShowBoundaryChange(e.target.checked)} />
             Show project boundary
@@ -191,7 +259,7 @@ export function MapItemColorControl({
             </div>
           )}
 
-          {!loading && selectedItem && (
+          {!loading && (selectedItem || (colorMode === "column" && selectedSpecialQueryColumn)) && (
             <div className="map-item-color-legend">
               <div className="map-item-color-legend-with-chart">
                 <StatusDonut segments={statusOrder.map((s) => ({ value: statusCounts[s] ?? 0, color: statusColors[s] }))} />
@@ -200,6 +268,22 @@ export function MapItemColorControl({
                     const count = statusCounts[s] ?? 0;
                     const percent = total > 0 ? (count / total) * 100 : 0;
                     const isActive = statusHighlight && statusHighlight.has(s);
+                    if (colorMode === "column") {
+                      return (
+                        <span key={s} className="map-item-color-legend-row">
+                          <input
+                            type="color"
+                            className="column-legend-color-input"
+                            value={columnColors[s] ?? "#cccccc"}
+                            onChange={(e) => onSetColumnColor?.(s, e.target.value)}
+                          />
+                          {s}
+                          <span className="map-item-color-count">
+                            {count} <span className="map-item-color-percent">({percent.toFixed(0)}%)</span>
+                          </span>
+                        </span>
+                      );
+                    }
                     return (
                       <button
                         type="button"
@@ -218,6 +302,11 @@ export function MapItemColorControl({
                   })}
                 </div>
               </div>
+              {colorMode === "column" && (
+                <button type="button" className="map-item-color-clear" onClick={onResetColumnColors}>
+                  Reset column colors
+                </button>
+              )}
               {statusHighlight && statusHighlight.size > 0 && (
                 <button type="button" className="map-item-color-clear" onClick={onClearStatusHighlight}>
                   Clear status spotlight

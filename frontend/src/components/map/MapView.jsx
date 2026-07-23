@@ -8,11 +8,15 @@ import { MapItemColorControl } from "./MapItemColorControl.jsx";
 import { MAP_DEFAULTS, GEOJSON_URL, BOUNDARY_GEOJSON_URL } from "../../config/mapConfig.js";
 import { useConstructionItemData } from "../../hooks/useConstructionItemData.js";
 import { useAllVillaStatuses } from "../../hooks/useAllVillaStatuses.js";
+import { useAllVillaInvoiceStatuses } from "../../hooks/useAllVillaInvoiceStatuses.js";
+import { useSpecialQueryData } from "../../hooks/useSpecialQueryData.js";
 import { renderPrintableMap } from "../../utils/renderPrintableMap.js";
 import { computeScheduleStatusFast } from "../../utils/scheduleUtils.js";
+import { evaluateCustomQuery } from "../../utils/customQueryUtils.js";
 import { constructionItemsApi } from "../../api/constructionItems.js";
-import { ITEM_STATUS_COLORS, ITEM_STATUS_ORDER } from "../../config/itemStatusColors.js";
-import { SCHEDULE_STATUS_COLORS, SCHEDULE_STATUS_ORDER, INVOICE_STATUS_COLORS, INVOICE_STATUS_ORDER } from "../../config/scheduleInvoiceColors.js";
+import { ITEM_STATUS_ORDER } from "../../config/itemStatusColors.js";
+import { SCHEDULE_STATUS_ORDER, INVOICE_STATUS_ORDER } from "../../config/scheduleInvoiceColors.js";
+import { useColorPreferences } from "../../contexts/ColorPreferencesContext.jsx";
 
 // Fits the map to the loaded geometry's bounds instead of relying on a
 // hardcoded setView(). This is the fix that resolved the earlier
@@ -36,6 +40,7 @@ function FitToBounds({ geojson }) {
 }
 
 export const MapView = forwardRef(function MapView({ onVillaClick, colorByItem, onColorByItemChange }, ref) {
+  const { getColors, getColumnColors, setColumnColor, resetColumnColors } = useColorPreferences();
   const [geojson, setGeojson] = useState(null);
   const [boundaryGeojson, setBoundaryGeojson] = useState(null);
   const [loadError, setLoadError] = useState(null);
@@ -43,10 +48,13 @@ export const MapView = forwardRef(function MapView({ onVillaClick, colorByItem, 
   const [selectedZones, setSelectedZones] = useState([]);
   const [selectedVillas, setSelectedVillas] = useState([]);
   const [selectedVillaTypes, setSelectedVillaTypes] = useState([]);
+  const [customQueryConditions, setCustomQueryConditions] = useState([]);
   const [highlightBlocks, setHighlightBlocks] = useState([]);
   const [highlightZones, setHighlightZones] = useState([]);
   const [showBoundary, setShowBoundary] = useState(false);
-  const [colorMode, setColorMode] = useState("status"); // status | schedule | invoice
+  const [colorMode, setColorMode] = useState("status"); // status | schedule | invoice | column
+  const [selectedSpecialQueryColumn, setSelectedSpecialQueryColumn] = useState("");
+  const [selectedColumnValues, setSelectedColumnValues] = useState([]);
   const [cutoffDate, setCutoffDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [constructionItemsTemplate, setConstructionItemsTemplate] = useState([]);
   // Click a status in the legend to spotlight only that status on the
@@ -90,7 +98,15 @@ export const MapView = forwardRef(function MapView({ onVillaClick, colorByItem, 
   // Schedule mode needs every villa's FULL status map too (to check
   // predecessor completion via the dependency graph) — fetched once,
   // independent of which item is selected, only when actually needed.
-  const { data: allVillaStatuses, status: allVillaStatusesLoadStatus } = useAllVillaStatuses(colorMode === "schedule");
+  const { data: allVillaStatuses, status: allVillaStatusesLoadStatus } = useAllVillaStatuses(
+    colorMode === "schedule" || customQueryConditions.length > 0
+  );
+  const { data: allVillaInvoiceStatuses } = useAllVillaInvoiceStatuses(customQueryConditions.length > 0);
+  const {
+    columns: specialQueryColumns,
+    valuesByColumn: specialQueryValuesByColumn,
+    byVilla: specialQueryByVilla,
+  } = useSpecialQueryData(true);
 
   // Map<id> / Map<TableItemID> lookups for the fast classifier — built
   // once per template load, not per villa.
@@ -125,9 +141,6 @@ export const MapView = forwardRef(function MapView({ onVillaClick, colorByItem, 
     return lookup;
   }, [colorMode, itemRows, allVillaStatuses, constructionItemsTemplate.length, itemMaps, colorByItem, cutoffDate]);
 
-  const itemStatusLookup = colorMode === "status" ? statusLookup : colorMode === "invoice" ? invoiceLookup : scheduleLookup;
-  const activeColors = colorMode === "status" ? ITEM_STATUS_COLORS : colorMode === "invoice" ? INVOICE_STATUS_COLORS : SCHEDULE_STATUS_COLORS;
-  const activeOrder = colorMode === "status" ? ITEM_STATUS_ORDER : colorMode === "invoice" ? INVOICE_STATUS_ORDER : SCHEDULE_STATUS_ORDER;
   const isLoading =
     colorMode === "schedule"
       ? itemDataLoadStatus === "loading" || allVillaStatusesLoadStatus === "loading" || (!!colorByItem && !scheduleLookup)
@@ -193,8 +206,14 @@ export const MapView = forwardRef(function MapView({ onVillaClick, colorByItem, 
         statusOrder: activeOrder,
         filteredVillaIDs,
         highlightVillaIDs,
+        customQueryVillaIDs,
+        customQueryColors: customQueryConditions.length > 0 ? getColors("customQuery") : null,
         titleText: "Sahms ElGhroub — Site Map",
-        subtitleText: colorByItem ? `Colored by: ${colorByItem.name} (${colorMode})` : undefined,
+        subtitleText: customQueryConditions.length > 0
+          ? "Colored by custom query"
+          : colorByItem
+            ? `Colored by: ${colorByItem.name} (${colorMode})`
+            : undefined,
       });
     },
   }));
@@ -218,6 +237,76 @@ export const MapView = forwardRef(function MapView({ onVillaClick, colorByItem, 
     });
     return map;
   }, [geojson]);
+
+  // Column mode: color every villa by its value for a chosen
+  // special-query column instead of a fixed status set. Reuses the SAME
+  // itemStatusLookup/colorPalette mechanism VillaLayer already has for
+  // Status/Schedule/Invoice — it's generic enough to just feed dynamic
+  // data into, no new coloring machinery needed there.
+  const columnValueLookup = useMemo(() => {
+    if (colorMode !== "column" || !selectedSpecialQueryColumn) return null;
+    const lookup = {};
+    Object.keys(villaMetaByID).forEach((villaID) => {
+      const value = specialQueryByVilla[villaID]?.[selectedSpecialQueryColumn];
+      lookup[villaID] = value !== undefined && value !== null && value !== "" ? String(value) : "(no value)";
+    });
+    return lookup;
+  }, [colorMode, selectedSpecialQueryColumn, specialQueryByVilla, villaMetaByID]);
+
+  const distinctColumnValues = useMemo(() => {
+    if (!selectedSpecialQueryColumn) return [];
+    return [...new Set([...(specialQueryValuesByColumn[selectedSpecialQueryColumn] ?? []).map(String), "(no value)"])];
+  }, [selectedSpecialQueryColumn, specialQueryValuesByColumn]);
+
+  // Every value selected by default the moment a column is picked —
+  // "see everything, then narrow down" rather than starting from
+  // nothing selected.
+  useEffect(() => {
+    if (selectedSpecialQueryColumn) setSelectedColumnValues(distinctColumnValues);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSpecialQueryColumn]);
+
+  const columnColors = useMemo(() => {
+    if (!selectedSpecialQueryColumn || distinctColumnValues.length === 0) return {};
+    return getColumnColors(selectedSpecialQueryColumn, distinctColumnValues);
+  }, [selectedSpecialQueryColumn, distinctColumnValues, getColumnColors]);
+
+  // Villas whose column value isn't in the current multi-select get
+  // muted, same "narrow, don't hide" treatment as every other filter.
+  // null (not filtered at all) when every value is selected, since
+  // muting nothing is the same as not filtering.
+  const columnFilterVillaIDs = useMemo(() => {
+    if (colorMode !== "column" || !selectedSpecialQueryColumn || !columnValueLookup) return null;
+    if (selectedColumnValues.length >= distinctColumnValues.length) return null;
+    const set = new Set();
+    Object.entries(columnValueLookup).forEach(([villaID, value]) => {
+      if (selectedColumnValues.includes(value)) set.add(villaID);
+    });
+    return set;
+  }, [colorMode, selectedSpecialQueryColumn, columnValueLookup, selectedColumnValues, distinctColumnValues.length]);
+
+  const itemStatusLookup =
+    colorMode === "status" ? statusLookup : colorMode === "invoice" ? invoiceLookup : colorMode === "schedule" ? scheduleLookup : columnValueLookup;
+  const activeColors = colorMode === "column" ? columnColors : getColors(colorMode);
+  const activeOrder =
+    colorMode === "status"
+      ? ITEM_STATUS_ORDER
+      : colorMode === "invoice"
+        ? INVOICE_STATUS_ORDER
+        : colorMode === "schedule"
+          ? SCHEDULE_STATUS_ORDER
+          : selectedColumnValues;
+
+  const customQueryVillaIDs = useMemo(() => {
+    if (customQueryConditions.length === 0) return null;
+    if (!allVillaStatuses || !allVillaInvoiceStatuses) return null; // still loading
+    return evaluateCustomQuery(customQueryConditions, {
+      villaMetaByID,
+      allVillaStatuses,
+      allVillaInvoiceStatuses,
+      specialQueryByVilla,
+    });
+  }, [customQueryConditions, allVillaStatuses, allVillaInvoiceStatuses, villaMetaByID, specialQueryByVilla]);
 
   // Hierarchy: Zone > Block > Villa Type > Villa. Each level narrows the
   // options for the next.
@@ -267,7 +356,9 @@ export const MapView = forwardRef(function MapView({ onVillaClick, colorByItem, 
       selectedBlocks.length === 0 &&
       selectedZones.length === 0 &&
       selectedVillas.length === 0 &&
-      selectedVillaTypes.length === 0
+      selectedVillaTypes.length === 0 &&
+      !customQueryVillaIDs &&
+      !columnFilterVillaIDs
     )
       return null;
     const set = new Set();
@@ -276,10 +367,12 @@ export const MapView = forwardRef(function MapView({ onVillaClick, colorByItem, 
       if (selectedBlocks.length > 0 && !selectedBlocks.includes(meta.blocknum)) return;
       if (selectedZones.length > 0 && !selectedZones.includes(meta.zonenum)) return;
       if (selectedVillaTypes.length > 0 && !selectedVillaTypes.includes(meta.villatype)) return;
+      if (customQueryVillaIDs && !customQueryVillaIDs.has(villaID)) return;
+      if (columnFilterVillaIDs && !columnFilterVillaIDs.has(villaID)) return;
       set.add(villaID);
     });
     return set;
-  }, [villaMetaByID, selectedBlocks, selectedZones, selectedVillas, selectedVillaTypes]);
+  }, [villaMetaByID, selectedBlocks, selectedZones, selectedVillas, selectedVillaTypes, customQueryVillaIDs, columnFilterVillaIDs]);
 
   // Highlight follows the same Zone > Block hierarchy: picking zones
   // narrows which blocks are offered, and drops out-of-scope block
@@ -403,6 +496,8 @@ export const MapView = forwardRef(function MapView({ onVillaClick, colorByItem, 
           filteredVillaIDs={filteredVillaIDs}
           highlightVillaIDs={highlightVillaIDs}
           statusHighlight={statusHighlight}
+          customQueryVillaIDs={customQueryVillaIDs}
+          customQueryColors={customQueryConditions.length > 0 ? getColors("customQuery") : null}
           forceAllLabels={forceAllLabels}
           onVillaClick={onVillaClick}
         />
@@ -457,6 +552,20 @@ export const MapView = forwardRef(function MapView({ onVillaClick, colorByItem, 
         onClearStatusHighlight={clearStatusHighlight}
         showBoundary={showBoundary}
         onShowBoundaryChange={setShowBoundary}
+        customQueryConditions={customQueryConditions}
+        onCustomQueryConditionsChange={setCustomQueryConditions}
+        villaMetaByID={villaMetaByID}
+        specialQueryColumns={specialQueryColumns}
+        specialQueryValuesByColumn={specialQueryValuesByColumn}
+        customQueryColors={getColors("customQuery")}
+        selectedSpecialQueryColumn={selectedSpecialQueryColumn}
+        onSelectedSpecialQueryColumnChange={setSelectedSpecialQueryColumn}
+        distinctColumnValues={distinctColumnValues}
+        selectedColumnValues={selectedColumnValues}
+        onSelectedColumnValuesChange={setSelectedColumnValues}
+        columnColors={columnColors}
+        onSetColumnColor={(value, color) => setColumnColor(selectedSpecialQueryColumn, value, color)}
+        onResetColumnColors={() => resetColumnColors(selectedSpecialQueryColumn)}
       />
     </>
   );

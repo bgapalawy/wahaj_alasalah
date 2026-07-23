@@ -40,6 +40,8 @@ export function renderPrintableMap({
   statusOrder = ITEM_STATUS_ORDER,
   filteredVillaIDs,
   highlightVillaIDs,
+  customQueryVillaIDs,
+  customQueryColors,
   titleText,
   subtitleText,
   // 6x the very first version's resolution. Went straight resolution
@@ -79,7 +81,7 @@ export function renderPrintableMap({
   const marginTop = 90 * SCALE;
   const marginBottom = 30 * SCALE;
   const marginX = 40 * SCALE;
-  const legendWidth = itemStatusLookup ? 200 * SCALE : 0;
+  const legendWidth = itemStatusLookup || (customQueryVillaIDs && customQueryColors) ? 200 * SCALE : 0;
   const mapAreaWidth = width - marginX * 2 - legendWidth;
   const mapAreaHeight = height - marginTop - marginBottom;
 
@@ -159,7 +161,9 @@ export function renderPrintableMap({
 
       const isHighlighted = highlightVillaIDs && highlightVillaIDs.has(villaID);
       let fill;
-      if (itemStatusLookup && filteredVillaIDs && !filteredVillaIDs.has(villaID)) {
+      if (customQueryVillaIDs && customQueryColors) {
+        fill = customQueryVillaIDs.has(villaID) ? customQueryColors.match : customQueryColors.noMatch;
+      } else if (itemStatusLookup && filteredVillaIDs && !filteredVillaIDs.has(villaID)) {
         fill = "rgba(0,0,0,0.3)";
       } else if (itemStatusLookup) {
         const itemStatus = itemStatusLookup[villaID] ?? "NotStarted";
@@ -240,7 +244,29 @@ export function renderPrintableMap({
   compositeCtx.fillStyle = "#94a3b8";
   compositeCtx.fillText(new Date().toLocaleDateString(), width - marginX, 20 * SCALE);
 
-  if (itemStatusLookup) {
+  if (customQueryVillaIDs && customQueryColors) {
+    const legendX = width - legendWidth - marginX + 20 * SCALE;
+    let legendY = marginTop + 10 * SCALE;
+    compositeCtx.textAlign = "left";
+    compositeCtx.font = `bold ${14 * SCALE}px sans-serif`;
+    compositeCtx.fillStyle = "#1f2937";
+    compositeCtx.fillText("Custom Query", legendX, legendY);
+    legendY += 26 * SCALE;
+    [
+      { label: "Matches the query", color: customQueryColors.match },
+      { label: "Doesn't match", color: customQueryColors.noMatch },
+    ].forEach(({ label, color }) => {
+      const swatch = 14 * SCALE;
+      compositeCtx.fillStyle = color;
+      compositeCtx.fillRect(legendX, legendY, swatch, swatch);
+      compositeCtx.strokeStyle = "#94a3b8";
+      compositeCtx.strokeRect(legendX, legendY, swatch, swatch);
+      compositeCtx.fillStyle = "#1f2937";
+      compositeCtx.font = `${13 * SCALE}px sans-serif`;
+      compositeCtx.fillText(label, legendX + swatch + 6 * SCALE, legendY + swatch * 0.8);
+      legendY += 22 * SCALE;
+    });
+  } else if (itemStatusLookup) {
     const legendX = width - legendWidth - marginX + 20 * SCALE;
     let legendY = marginTop + 10 * SCALE;
     compositeCtx.textAlign = "left";

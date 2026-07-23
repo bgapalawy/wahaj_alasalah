@@ -161,6 +161,99 @@ button, input, select {
   background: rgba(220, 38, 38, 0.3);
 }
 
+.color-settings-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.color-settings-rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.color-settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.4rem 0.6rem;
+  background: var(--color-surface-alt);
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+}
+
+.color-settings-row input[type="color"] {
+  width: 40px;
+  height: 28px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  padding: 0;
+}
+
+.custom-query-section {
+  margin: var(--space-2) 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 0.5rem 0.6rem;
+}
+
+.custom-query-section summary {
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.custom-query-builder {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.custom-query-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  align-items: center;
+}
+
+.custom-query-row select {
+  font-size: 0.75rem;
+  padding: 0.25rem 0.4rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border-strong);
+}
+
+.custom-query-conjunction {
+  font-weight: 700;
+  color: var(--color-primary);
+}
+
+.custom-query-remove {
+  background: none;
+  border: none;
+  color: var(--color-danger);
+  font-size: 1rem;
+  cursor: pointer;
+  padding: 0 0.3rem;
+}
+
+.custom-query-add {
+  align-self: flex-start;
+  background: var(--color-surface-alt);
+  border: 1px dashed var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  padding: 0.3rem 0.6rem;
+  font-size: 0.75rem;
+  cursor: pointer;
+  color: var(--color-primary);
+}
+
 .admin-import-export {
   display: flex;
   flex-direction: column;
@@ -666,6 +759,16 @@ button, input, select {
   font-size: 0.78rem;
   font-weight: 400;
   text-transform: none;
+}
+
+.column-legend-color-input {
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 3px;
+  padding: 0;
+  cursor: pointer;
+  flex-shrink: 0;
 }
 
 .map-remaining-badge {

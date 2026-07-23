@@ -11,11 +11,15 @@ const AllProjectsDashboard = lazy(() =>
 const AdminImportExport = lazy(() =>
   import("./components/admin/AdminImportExport.jsx").then((m) => ({ default: m.AdminImportExport }))
 );
+const ColorSettingsPanel = lazy(() =>
+  import("./components/settings/ColorSettingsPanel.jsx").then((m) => ({ default: m.ColorSettingsPanel }))
+);
 
 export default function App() {
   const [selectedVillaID, setSelectedVillaID] = useState(null);
   const [showProjectDashboard, setShowProjectDashboard] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
+  const [showColorSettings, setShowColorSettings] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
   // Lifted up from MapView so the villa panel can pre-select the same
   // construction item you're currently coloring the map by — no more
@@ -102,6 +106,9 @@ export default function App() {
           <button type="button" className="header-admin-btn" onClick={() => setShowAdmin(true)}>
             Admin
           </button>
+          <button type="button" className="header-dashboard-btn" onClick={() => setShowColorSettings(true)}>
+            Colors
+          </button>
         </div>
       </header>
       <main className="app-main">
@@ -146,6 +153,22 @@ export default function App() {
             </div>
             <Suspense fallback={<p className="graph-loading">Loading admin panel…</p>}>
               <AdminImportExport />
+            </Suspense>
+          </div>
+        </div>
+      )}
+
+      {showColorSettings && (
+        <div className="graph-modal-backdrop" onClick={() => setShowColorSettings(false)}>
+          <div className="graph-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="graph-modal-header">
+              <h3>Legend Colors</h3>
+              <button type="button" onClick={() => setShowColorSettings(false)} aria-label="Close">
+                ×
+              </button>
+            </div>
+            <Suspense fallback={<p className="graph-loading">Loading…</p>}>
+              <ColorSettingsPanel />
             </Suspense>
           </div>
         </div>
