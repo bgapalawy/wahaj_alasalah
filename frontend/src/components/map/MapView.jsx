@@ -216,6 +216,116 @@ export const MapView = forwardRef(function MapView({ onVillaClick, colorByItem, 
             : undefined,
       });
     },
+    // Raw draw context for the TRUE-VECTOR PDF exporter
+    // (buildVectorLayoutPdf) — same data VillaLayer consumes, handed
+    // over un-rendered so jsPDF can draw real vector paths and
+    // selectable text instead of embedding a raster image. Covers all
+    // four color modes (status/schedule/invoice/column) plus the
+    // custom-query overlay.
+    getPrintContext(options = {}) {
+      return {
+        geojson,
+        boundaryGeojson,
+        itemStatusLookup,
+        colorPalette: activeColors,
+        statusOrder: activeOrder,
+        statusCounts,
+        filteredVillaIDs,
+        highlightVillaIDs,
+        customQueryVillaIDs,
+        customQueryColors: customQueryConditions.length > 0 ? getColors("customQuery") : null,
+        titleText: options.printWindow ? "Site Map — Selected Area" : "Site Map — Villa Status",
+        subtitleText: customQueryConditions.length > 0
+          ? "Colored by custom query"
+          : colorMode === "column" && selectedSpecialQueryColumn
+            ? `Colored by column: ${selectedSpecialQueryColumn}`
+            : colorByItem
+              ? `Colored by: ${colorByItem.name} (${colorMode})`
+              : undefined,
+        printWindow: options.printWindow ?? null,
+      };
+    },
+    // AutoCAD "Plot > Window" selection: puts the live Leaflet map into a
+    // one-shot rubber-band mode. The user drags a rectangle; we resolve
+    // with its geographic bounds ({minLng,minLat,maxLng,maxLat}) or null
+    // if cancelled (Escape / zero-size drag). Map panning is suspended
+    // during the drag and fully restored afterwards.
+    selectPrintArea() {
+      const map = mapInstanceRef.current;
+      if (!map) return Promise.resolve(null);
+
+      return new Promise((resolve) => {
+        const container = map.getContainer();
+        const rubber = document.createElement("div");
+        rubber.style.cssText =
+          "position:absolute;border:2px dashed #2563eb;background:rgba(37,99,235,0.12);pointer-events:none;z-index:1000;display:none;";
+        container.appendChild(rubber);
+        container.style.cursor = "crosshair";
+        map.dragging.disable();
+
+        let startPt = null;
+
+        const cleanup = () => {
+          container.style.cursor = "";
+          map.dragging.enable();
+          rubber.remove();
+          container.removeEventListener("mousedown", onDown);
+          container.removeEventListener("mousemove", onMove);
+          window.removeEventListener("mouseup", onUp);
+          window.removeEventListener("keydown", onKey);
+        };
+
+        const toContainerPt = (e) => {
+          const r = container.getBoundingClientRect();
+          return { x: e.clientX - r.left, y: e.clientY - r.top };
+        };
+
+        const onDown = (e) => {
+          startPt = toContainerPt(e);
+          rubber.style.display = "block";
+          rubber.style.left = `${startPt.x}px`;
+          rubber.style.top = `${startPt.y}px`;
+          rubber.style.width = "0px";
+          rubber.style.height = "0px";
+          e.preventDefault();
+        };
+
+        const onMove = (e) => {
+          if (!startPt) return;
+          const p = toContainerPt(e);
+          rubber.style.left = `${Math.min(startPt.x, p.x)}px`;
+          rubber.style.top = `${Math.min(startPt.y, p.y)}px`;
+          rubber.style.width = `${Math.abs(p.x - startPt.x)}px`;
+          rubber.style.height = `${Math.abs(p.y - startPt.y)}px`;
+        };
+
+        const onUp = (e) => {
+          if (!startPt) return;
+          const p = toContainerPt(e);
+          const x0 = Math.min(startPt.x, p.x), x1 = Math.max(startPt.x, p.x);
+          const y0 = Math.min(startPt.y, p.y), y1 = Math.max(startPt.y, p.y);
+          cleanup();
+          if (x1 - x0 < 8 || y1 - y0 < 8) { resolve(null); return; }
+          const nw = map.containerPointToLatLng([x0, y0]);
+          const se = map.containerPointToLatLng([x1, y1]);
+          resolve({
+            minLng: Math.min(nw.lng, se.lng),
+            maxLng: Math.max(nw.lng, se.lng),
+            minLat: Math.min(nw.lat, se.lat),
+            maxLat: Math.max(nw.lat, se.lat),
+          });
+        };
+
+        const onKey = (e) => {
+          if (e.key === "Escape") { cleanup(); resolve(null); }
+        };
+
+        container.addEventListener("mousedown", onDown);
+        container.addEventListener("mousemove", onMove);
+        window.addEventListener("mouseup", onUp);
+        window.addEventListener("keydown", onKey);
+      });
+    },
   }));
 
   // Block, Zone (zonenum), and Villa Type all live on the GeoJSON feature

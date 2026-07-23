@@ -1696,3 +1696,45 @@ button, input, select {
   color: var(--color-text-faint);
   text-transform: none;
 }
+
+/* ============================================================
+   Vector plot controls (ported from shams_elghroup)
+   ============================================================ */
+.paper-size-select {
+  padding: 0.45rem 0.6rem;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  background: rgba(255, 255, 255, 0.08);
+  color: white;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+.paper-size-select option {
+  color: #1a1a1a;
+}
+.paper-size-select:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Floating instruction banner shown while the user drags the
+   AutoCAD-style plot window on the map. Above Leaflet's panes
+   (z-index 400-700) but below modals. */
+.print-area-hint {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1100;
+  background: #1e293bee;
+  color: #f8fafc;
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  padding: 8px 18px;
+  border-radius: 999px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  pointer-events: none;
+  white-space: nowrap;
+}
