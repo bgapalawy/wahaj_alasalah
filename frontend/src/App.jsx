@@ -1,5 +1,5 @@
 import { Suspense, lazy, useRef, useState } from "react";
-import { flushSync } from "react-dom";
+import { downloadVectorLayoutPdf } from "./utils/buildVectorLayoutPdf.js";
 import { MapView } from "./components/map/MapView.jsx";
 import { VillaDetailsPanel } from "./components/panels/VillaDetailsPanel.jsx";
 import "./styles/app.css";
@@ -21,73 +21,53 @@ export default function App() {
   const [showAdmin, setShowAdmin] = useState(false);
   const [showColorSettings, setShowColorSettings] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
+  const [selectingArea, setSelectingArea] = useState(false);
   // Lifted up from MapView so the villa panel can pre-select the same
   // construction item you're currently coloring the map by — no more
   // reselecting it every time you click a villa.
   const [colorByItem, setColorByItem] = useState(null);
-  const [printSnapshotUrl, setPrintSnapshotUrl] = useState(null);
+  // Plot sheet size — like AutoCAD's paper-size dropdown in the Plot
+  // dialog. The layout engine scales the whole sheet (frames, title
+  // block, scale bar, grid) to the chosen ISO size.
+  const [paperSize, setPaperSize] = useState("a1");
   const mapViewRef = useRef(null);
-  const printImgRef = useRef(null);
 
-  // Native browser print dialog. Snapshot just the map into a static
-  // image right before printing (see MapView's captureMapSnapshot — two
-  // DOM-based approaches failed before this one, and two timing fixes on
-  // top of THAT still didn't work). Two more specific bugs, found by
-  // reasoning through what could still be wrong rather than guessing
-  // blind a third time:
-  //
-  // 1. The captured image is a large base64 PNG (a 2200x1500 canvas with
-  //    ~1,540 filled polygons). Setting it as an <img src> doesn't mean
-  //    it's actually decoded and painted yet — a couple of
-  //    requestAnimationFrame waits is nowhere near enough for a
-  //    multi-megabyte image on a slower machine. Now explicitly awaits
-  //    img.decode() so we KNOW the pixels are ready before printing,
-  //    instead of hoping a fixed delay was long enough.
-  // 2. setPrintSnapshotUrl() is a React state update — by default it
-  //    doesn't guarantee the DOM has actually updated by the very next
-  //    line of code. Wrapped in flushSync so the <img> element and its
-  //    src are guaranteed to exist in the DOM before trying to reference
-  //    it via printImgRef.
-  //
-  // Also simplified the CSS: the image no longer uses
-  // position:absolute/inset:0 (which depended on .app-main having a
-  // reliable, definite height during print — genuinely uncertain across
-  // browsers/OS print pipelines). It's now a plain block image with
-  // width:100%, sized by its own aspect ratio, positioned by normal
-  // document flow instead of depending on an ancestor's box.
-  async function handleDownloadPdf() {
+  // Direct PDF download — TRUE VECTOR. buildVectorLayoutPdf draws the
+  // whole layout sheet (parcels, labels, frame, graticule, title block,
+  // legend, scale bar) as PDF vector primitives via jsPDF. No canvas,
+  // no raster embed — infinitely sharp at any zoom like an AutoCAD
+  // "plot to PDF", with selectable text and ~1-2 MB files. The
+  // on-screen Leaflet view is irrelevant (we draw from raw GeoJSON), so
+  // no prepare/restore zoom dance is needed.
+  async function handleExportPdfDirect() {
     setExportingPdf(true);
     try {
-      await mapViewRef.current?.prepareForExport();
-      const snapshot = await mapViewRef.current?.captureMapSnapshot();
-
-      flushSync(() => setPrintSnapshotUrl(snapshot ?? null));
-
-      if (printImgRef.current) {
-        try {
-          await printImgRef.current.decode();
-        } catch (err) {
-          console.error("Print snapshot image failed to decode:", err);
-        }
-      }
-
-      await new Promise((resolve) => {
-        let done = false;
-        function finish() {
-          if (done) return;
-          done = true;
-          window.removeEventListener("afterprint", finish);
-          resolve();
-        }
-        window.addEventListener("afterprint", finish);
-        window.print();
-        // Fallback: some browsers/printer drivers don't fire afterprint
-        // reliably, especially for "print to file" style printers.
-        setTimeout(finish, 20000);
-      });
+      const ctx = mapViewRef.current?.getPrintContext();
+      if (ctx) await downloadVectorLayoutPdf({ ...ctx, paperSize }, "ShamsElGhroub_SiteMap");
     } finally {
-      setPrintSnapshotUrl(null);
-      mapViewRef.current?.restoreAfterExport();
+      setExportingPdf(false);
+    }
+  }
+
+  // AutoCAD-style "Plot > Window": the user drags a rectangle on the
+  // live map, and ONLY that area is plotted onto the layout sheet and
+  // downloaded as a PDF. The selected geographic window alone defines
+  // the plot — the on-screen zoom level doesn't matter.
+  async function handlePrintArea() {
+    setSelectingArea(true);
+    let printWindow = null;
+    try {
+      printWindow = await mapViewRef.current?.selectPrintArea();
+    } finally {
+      setSelectingArea(false);
+    }
+    if (!printWindow) return; // cancelled
+
+    setExportingPdf(true);
+    try {
+      const ctx = mapViewRef.current?.getPrintContext({ printWindow });
+      if (ctx) await downloadVectorLayoutPdf({ ...ctx, paperSize }, "ShamsElGhroub_SelectedArea");
+    } finally {
       setExportingPdf(false);
     }
   }
@@ -97,8 +77,28 @@ export default function App() {
       <header className="app-header">
         <h1>Sahms ElGhroub</h1>
         <div className="app-header-actions">
-          <button type="button" className="header-dashboard-btn" onClick={handleDownloadPdf} disabled={exportingPdf}>
-            {exportingPdf ? "Preparing…" : "Print / Save PDF"}
+          <select
+            className="paper-size-select"
+            value={paperSize}
+            onChange={(e) => setPaperSize(e.target.value)}
+            disabled={exportingPdf || selectingArea}
+            aria-label="Plot paper size"
+            title="Plot paper size"
+          >
+            <option value="a1">A1</option>
+            <option value="a2">A2</option>
+            <option value="a3">A3</option>
+          </select>
+          <button
+            type="button"
+            className="header-dashboard-btn"
+            onClick={handlePrintArea}
+            disabled={exportingPdf || selectingArea}
+          >
+            {selectingArea ? "Drag on map…" : "Print Area"}
+          </button>
+          <button type="button" className="header-dashboard-btn" onClick={handleExportPdfDirect} disabled={exportingPdf || selectingArea}>
+            {exportingPdf ? "Preparing…" : "Download PDF"}
           </button>
           <button type="button" className="header-dashboard-btn" onClick={() => setShowProjectDashboard(true)}>
             Project Dashboard
@@ -112,13 +112,17 @@ export default function App() {
         </div>
       </header>
       <main className="app-main">
+        {selectingArea && (
+          <div className="print-area-hint">
+            Drag a rectangle over the area you want to print — press Esc to cancel
+          </div>
+        )}
         <MapView
           ref={mapViewRef}
           onVillaClick={setSelectedVillaID}
           colorByItem={colorByItem}
           onColorByItemChange={setColorByItem}
         />
-        {printSnapshotUrl && <img ref={printImgRef} src={printSnapshotUrl} alt="" className="print-map-snapshot" />}
         <VillaDetailsPanel
           villaID={selectedVillaID}
           onClose={() => setSelectedVillaID(null)}
