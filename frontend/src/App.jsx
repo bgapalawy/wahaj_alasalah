@@ -8,10 +8,14 @@ import "./styles/app.css";
 const AllProjectsDashboard = lazy(() =>
   import("./components/dashboard/AllProjectsDashboard.jsx").then((m) => ({ default: m.AllProjectsDashboard }))
 );
+const AdminImportExport = lazy(() =>
+  import("./components/admin/AdminImportExport.jsx").then((m) => ({ default: m.AdminImportExport }))
+);
 
 export default function App() {
   const [selectedVillaID, setSelectedVillaID] = useState(null);
   const [showProjectDashboard, setShowProjectDashboard] = useState(false);
+  const [showAdmin, setShowAdmin] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
   // Lifted up from MapView so the villa panel can pre-select the same
   // construction item you're currently coloring the map by — no more
@@ -95,6 +99,9 @@ export default function App() {
           <button type="button" className="header-dashboard-btn" onClick={() => setShowProjectDashboard(true)}>
             Project Dashboard
           </button>
+          <button type="button" className="header-admin-btn" onClick={() => setShowAdmin(true)}>
+            Admin
+          </button>
         </div>
       </header>
       <main className="app-main">
@@ -123,6 +130,22 @@ export default function App() {
             </div>
             <Suspense fallback={<p className="graph-loading">Loading dashboard…</p>}>
               <AllProjectsDashboard />
+            </Suspense>
+          </div>
+        </div>
+      )}
+
+      {showAdmin && (
+        <div className="graph-modal-backdrop" onClick={() => setShowAdmin(false)}>
+          <div className="graph-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="graph-modal-header">
+              <h3>Admin — Import / Export</h3>
+              <button type="button" onClick={() => setShowAdmin(false)} aria-label="Close">
+                ×
+              </button>
+            </div>
+            <Suspense fallback={<p className="graph-loading">Loading admin panel…</p>}>
+              <AdminImportExport />
             </Suspense>
           </div>
         </div>

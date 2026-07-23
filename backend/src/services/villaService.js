@@ -1,11 +1,11 @@
 import {
   GetCommand,
-  ScanCommand,
   UpdateCommand,
 } from "@aws-sdk/lib-dynamodb";
 import { ddb, tables } from "../config/aws.js";
 import { computeVillaStatus, getAllActivityStatuses, getManyActivityStatuses } from "./activityStatusService.js";
 import { isValidVillaID } from "../utils/villaIdRange.js";
+import { scanEntireTable } from "./wideTableService.js";
 
 /**
  * Wraps DynamoDB's ResourceNotFoundException with a message that actually
@@ -19,23 +19,6 @@ function explainIfMissingTable(err, tableName) {
     err.message = `DynamoDB table "${tableName}" not found in region "${process.env.AWS_REGION}". Check DDB_VILLAS_TABLE and AWS_REGION in backend/.env against the real table.`;
   }
   throw err;
-}
-
-/**
- * DynamoDB's Scan caps each response at ~1MB and sets LastEvaluatedKey if
- * there's more data — a single ScanCommand silently drops the rest once a
- * table gets big enough. This loops until LastEvaluatedKey is gone so the
- * villas table is read in full regardless of size.
- */
-async function scanEntireTable(tableName) {
-  const items = [];
-  let ExclusiveStartKey;
-  do {
-    const result = await ddb.send(new ScanCommand({ TableName: tableName, ExclusiveStartKey }));
-    items.push(...(result.Items ?? []));
-    ExclusiveStartKey = result.LastEvaluatedKey;
-  } while (ExclusiveStartKey);
-  return items;
 }
 
 /**

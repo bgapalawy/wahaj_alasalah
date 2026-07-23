@@ -9,7 +9,7 @@ import { MAP_DEFAULTS, GEOJSON_URL, BOUNDARY_GEOJSON_URL } from "../../config/ma
 import { useConstructionItemData } from "../../hooks/useConstructionItemData.js";
 import { useAllVillaStatuses } from "../../hooks/useAllVillaStatuses.js";
 import { renderPrintableMap } from "../../utils/renderPrintableMap.js";
-import { computeScheduleStatus } from "../../utils/scheduleUtils.js";
+import { computeScheduleStatusFast } from "../../utils/scheduleUtils.js";
 import { constructionItemsApi } from "../../api/constructionItems.js";
 import { ITEM_STATUS_COLORS, ITEM_STATUS_ORDER } from "../../config/itemStatusColors.js";
 import { SCHEDULE_STATUS_COLORS, SCHEDULE_STATUS_ORDER, INVOICE_STATUS_COLORS, INVOICE_STATUS_ORDER } from "../../config/scheduleInvoiceColors.js";
@@ -92,6 +92,19 @@ export const MapView = forwardRef(function MapView({ onVillaClick, colorByItem, 
   // independent of which item is selected, only when actually needed.
   const { data: allVillaStatuses, status: allVillaStatusesLoadStatus } = useAllVillaStatuses(colorMode === "schedule");
 
+  // Map<id> / Map<TableItemID> lookups for the fast classifier — built
+  // once per template load, not per villa.
+  const itemMaps = useMemo(() => {
+    const itemById = new Map(constructionItemsTemplate.map((t) => [t.id, t]));
+    const itemByTableId = new Map(constructionItemsTemplate.map((t) => [t.TableItemID, t]));
+    return { itemById, itemByTableId };
+  }, [constructionItemsTemplate]);
+
+  // Uses the FAST classifier (verified equivalent to the recursive
+  // version — see scheduleUtils.js) instead of the original recursive
+  // one, which benchmarked at ~110ms for ~1,540 villas here (vs ~15ms
+  // fast) — enough synchronous main-thread work on a slower machine to
+  // feel like a freeze every time you touch Schedule mode.
   const scheduleLookup = useMemo(() => {
     if (colorMode !== "schedule" || !itemRows || !allVillaStatuses || constructionItemsTemplate.length === 0 || !colorByItem) {
       return null;
@@ -99,17 +112,18 @@ export const MapView = forwardRef(function MapView({ onVillaClick, colorByItem, 
     const cutoff = new Date(`${cutoffDate}T00:00:00`);
     const lookup = {};
     itemRows.forEach((r) => {
-      lookup[r.villaID] = computeScheduleStatus({
+      lookup[r.villaID] = computeScheduleStatusFast({
         targetTableItemId: colorByItem.TableItemID,
         targetActualStatus: r.actualStatus,
         targetPlannedStartDate: r.plannedStartDate,
         cutoffDate: cutoff,
-        allActivitiesTemplate: constructionItemsTemplate,
+        itemById: itemMaps.itemById,
+        itemByTableId: itemMaps.itemByTableId,
         villaStatusMap: allVillaStatuses[r.villaID] ?? {},
       });
     });
     return lookup;
-  }, [colorMode, itemRows, allVillaStatuses, constructionItemsTemplate, colorByItem, cutoffDate]);
+  }, [colorMode, itemRows, allVillaStatuses, constructionItemsTemplate.length, itemMaps, colorByItem, cutoffDate]);
 
   const itemStatusLookup = colorMode === "status" ? statusLookup : colorMode === "invoice" ? invoiceLookup : scheduleLookup;
   const activeColors = colorMode === "status" ? ITEM_STATUS_COLORS : colorMode === "invoice" ? INVOICE_STATUS_COLORS : SCHEDULE_STATUS_COLORS;

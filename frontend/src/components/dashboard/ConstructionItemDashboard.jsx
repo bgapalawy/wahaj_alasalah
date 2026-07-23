@@ -4,7 +4,7 @@ import { Pie } from "react-chartjs-2";
 import * as XLSX from "xlsx";
 import { dashboardApi } from "../../api/dashboard.js";
 import { calculateDashboardMetrics, getProjectDateRange, formatCurrency } from "../../utils/dashboardUtils.js";
-import { computeScheduleStatus } from "../../utils/scheduleUtils.js";
+import { computeScheduleStatusFast } from "../../utils/scheduleUtils.js";
 import { ConstructionItemSelect } from "../panels/ConstructionItemSelect.jsx";
 import { ITEM_STATUS_COLORS, ITEM_STATUS_ORDER } from "../../config/itemStatusColors.js";
 import { SCHEDULE_STATUS_COLORS, SCHEDULE_STATUS_ORDER, INVOICE_STATUS_COLORS, INVOICE_STATUS_ORDER } from "../../config/scheduleInvoiceColors.js";
@@ -79,10 +79,19 @@ export function ConstructionItemDashboard() {
     return [...knownRows, ...synthesized];
   }, [rows, villaMetaByID]);
 
-  // Schedule status is computed client-side per villa, reusing the exact
-  // same dependency-graph logic as the map's Schedule mode — needs each
-  // villa's FULL status map (for predecessor checks) and the item
-  // template (for the predecessor chain itself).
+  // Map<id> / Map<TableItemID> lookups for the fast classifier — built
+  // once per template load, not per villa.
+  const itemMaps = useMemo(() => {
+    const itemById = new Map(constructionItemsTemplate.map((t) => [t.id, t]));
+    const itemByTableId = new Map(constructionItemsTemplate.map((t) => [t.TableItemID, t]));
+    return { itemById, itemByTableId };
+  }, [constructionItemsTemplate]);
+
+  // Schedule status is computed client-side per villa, reusing the FAST
+  // classifier (verified equivalent to the recursive version — see
+  // scheduleUtils.js). Benchmarked ~7x faster at ~1,540 villas; the
+  // recursive version was enough synchronous work to feel like a freeze
+  // on a slower machine every time Schedule mode was touched.
   const scheduleStatusByVilla = useMemo(() => {
     if (colorMode !== "schedule" || !selectedItem || !allVillaStatuses || constructionItemsTemplate.length === 0) {
       return null;
@@ -90,17 +99,18 @@ export function ConstructionItemDashboard() {
     const cutoff = new Date(`${analysisDate}T00:00:00`);
     const lookup = {};
     enrichedRows.forEach((r) => {
-      lookup[r.villaID] = computeScheduleStatus({
+      lookup[r.villaID] = computeScheduleStatusFast({
         targetTableItemId: selectedItem.TableItemID,
         targetActualStatus: r.actualStatus,
         targetPlannedStartDate: r.plannedStartDate,
         cutoffDate: cutoff,
-        allActivitiesTemplate: constructionItemsTemplate,
+        itemById: itemMaps.itemById,
+        itemByTableId: itemMaps.itemByTableId,
         villaStatusMap: allVillaStatuses[r.villaID] ?? {},
       });
     });
     return lookup;
-  }, [colorMode, selectedItem, allVillaStatuses, constructionItemsTemplate, enrichedRows, analysisDate]);
+  }, [colorMode, selectedItem, allVillaStatuses, constructionItemsTemplate.length, itemMaps, enrichedRows, analysisDate]);
 
   // Which field each row's "current status" comes from, for whichever
   // mode is active — everything else (pie, table column, counts) just

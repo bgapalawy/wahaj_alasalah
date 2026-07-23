@@ -16,7 +16,10 @@ import { dashboardApi } from "../../api/dashboard.js";
 import { aggregateByPeriod, formatPeriodLabel, formatCurrency, downloadChartAsImage } from "../../utils/dashboardUtils.js";
 import { aggregateByCategory, aggregateTotalBudget, getTopItems, getFilteredDateSummary, formatSAR } from "../../utils/portfolioFilterUtils.js";
 import { VILLA_STATUS_COLORS } from "../../config/mapConfig.js";
-import { INVOICE_STATUS_COLORS, INVOICE_STATUS_ORDER } from "../../config/scheduleInvoiceColors.js";
+import { INVOICE_STATUS_COLORS, INVOICE_STATUS_ORDER, SCHEDULE_STATUS_COLORS, SCHEDULE_STATUS_ORDER } from "../../config/scheduleInvoiceColors.js";
+import { computeScheduleStatusFast } from "../../utils/scheduleUtils.js";
+import { useAllVillaStatuses } from "../../hooks/useAllVillaStatuses.js";
+import { constructionItemsApi } from "../../api/constructionItems.js";
 import { CATEGORY_COLOR_PALETTE } from "../../utils/graphUtils.js";
 import { FilterBar } from "./FilterBar.jsx";
 
@@ -240,6 +243,43 @@ export function AllProjectsDashboard() {
     });
   }, [data, filters, enrichedRecords]);
 
+  // Portfolio-wide Schedule breakdown — needs every villa's full status
+  // map (for predecessor checks) and the item template (predecessor
+  // chains), same data sources as the map/By Item tab's Schedule mode.
+  const { data: allVillaStatuses } = useAllVillaStatuses(true);
+  const [constructionItemsTemplate, setConstructionItemsTemplate] = useState([]);
+  useEffect(() => {
+    constructionItemsApi.list().then(setConstructionItemsTemplate).catch(() => setConstructionItemsTemplate([]));
+  }, []);
+  const itemMaps = useMemo(() => {
+    const itemById = new Map(constructionItemsTemplate.map((t) => [t.id, t]));
+    const itemByTableId = new Map(constructionItemsTemplate.map((t) => [t.TableItemID, t]));
+    return { itemById, itemByTableId };
+  }, [constructionItemsTemplate]);
+
+  // Uses the FAST classifier (see scheduleUtils.js) — verified equivalent
+  // to the map/By Item tab's version, but this needs to run across every
+  // filtered record (potentially ~126,000 for the whole project), where
+  // the original recursive version would be far too slow.
+  const scheduleCounts = useMemo(() => {
+    if (!filters || !allVillaStatuses || constructionItemsTemplate.length === 0) return {};
+    const cutoff = new Date(`${filters.endDate}T00:00:00`);
+    const counts = {};
+    filteredRecords.forEach((r) => {
+      const s = computeScheduleStatusFast({
+        targetTableItemId: r.TableItemID,
+        targetActualStatus: r.actualStatus,
+        targetPlannedStartDate: r.plannedStartDate,
+        cutoffDate: cutoff,
+        itemById: itemMaps.itemById,
+        itemByTableId: itemMaps.itemByTableId,
+        villaStatusMap: allVillaStatuses[r.villaID] ?? {},
+      });
+      counts[s] = (counts[s] ?? 0) + 1;
+    });
+    return counts;
+  }, [filters, filteredRecords, allVillaStatuses, constructionItemsTemplate.length, itemMaps]);
+
   const rangeEndDate = filters ? new Date(`${filters.endDate}T00:00:00`) : new Date();
 
   // "Up to [end date]": planned cost date-adjusted for elapsed working
@@ -385,6 +425,13 @@ export function AllProjectsDashboard() {
     status: s,
     count: invoiceCounts[s] ?? 0,
     percent: invoiceTotal > 0 ? ((invoiceCounts[s] ?? 0) / invoiceTotal) * 100 : 0,
+  }));
+
+  const scheduleTotal = SCHEDULE_STATUS_ORDER.reduce((sum, s) => sum + (scheduleCounts[s] ?? 0), 0);
+  const scheduleTableRows = SCHEDULE_STATUS_ORDER.map((s) => ({
+    status: s,
+    count: scheduleCounts[s] ?? 0,
+    percent: scheduleTotal > 0 ? ((scheduleCounts[s] ?? 0) / scheduleTotal) * 100 : 0,
   }));
 
   // Every category row now carries BOTH the Total (whole filtered scope,
@@ -725,6 +772,66 @@ export function AllProjectsDashboard() {
                     </thead>
                     <tbody>
                       {invoiceTableRows.map((r) => (
+                        <tr key={r.status}>
+                          <td>{r.status}</td>
+                          <td>{r.count}</td>
+                          <td>{r.percent.toFixed(1)}%</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="dashboard-pies">
+                  <div className="dashboard-pie" style={{ width: 200 }}>
+                    <h4>Schedule by Status — as of {filters.endDate}</h4>
+                    <Pie
+                      data={{
+                        labels: SCHEDULE_STATUS_ORDER,
+                        datasets: [
+                          {
+                            data: SCHEDULE_STATUS_ORDER.map((s) => scheduleCounts[s] ?? 0),
+                            backgroundColor: SCHEDULE_STATUS_ORDER.map((s) => SCHEDULE_STATUS_COLORS[s]),
+                            borderWidth: 0,
+                          },
+                        ],
+                      }}
+                      options={{ plugins: { legend: { position: "bottom", labels: { boxWidth: 10, font: { size: 10 } } } } }}
+                    />
+                  </div>
+                </div>
+
+                <div className="dashboard-chart-section">
+                  <div className="dashboard-chart-actions">
+                    <h4>Schedule by Status — detail</h4>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        downloadRowsAsExcel(
+                          scheduleTableRows.map((r) => ({ Status: r.status, Count: r.count, "% of Item-Records": r.percent.toFixed(1) })),
+                          "Schedule by Status",
+                          "schedule_by_status"
+                        )
+                      }
+                    >
+                      Download Table
+                    </button>
+                  </div>
+                  <p className="file-status-hint" style={{ marginTop: "-0.25rem" }}>
+                    Is each activity on track given its planned date and dependencies, as of {filters.endDate} (your Date
+                    Range's end date doubles as the schedule cutoff). "ready" means due and unblocked; "blocked" means due but
+                    waiting on a predecessor.
+                  </p>
+                  <table className="dashboard-table">
+                    <thead>
+                      <tr>
+                        <th>Status</th>
+                        <th>Count</th>
+                        <th>% of Item-Records</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {scheduleTableRows.map((r) => (
                         <tr key={r.status}>
                           <td>{r.status}</td>
                           <td>{r.count}</td>

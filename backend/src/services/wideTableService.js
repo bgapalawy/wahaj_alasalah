@@ -1,5 +1,24 @@
-import { GetCommand, BatchGetCommand } from "@aws-sdk/lib-dynamodb";
+import { GetCommand, BatchGetCommand, ScanCommand } from "@aws-sdk/lib-dynamodb";
 import { ddb } from "../config/aws.js";
+
+/**
+ * DynamoDB's Scan caps each response at ~1MB and sets LastEvaluatedKey if
+ * there's more data — a single ScanCommand silently drops the rest once a
+ * table gets big enough. This loops until LastEvaluatedKey is gone so any
+ * table is read in full regardless of size. Shared here (rather than
+ * duplicated in villaService.js, where it used to live only locally) so
+ * the admin import/export tool can scan any of the wide tables too.
+ */
+export async function scanEntireTable(tableName) {
+  const items = [];
+  let ExclusiveStartKey;
+  do {
+    const result = await ddb.send(new ScanCommand({ TableName: tableName, ExclusiveStartKey }));
+    items.push(...(result.Items ?? []));
+    ExclusiveStartKey = result.LastEvaluatedKey;
+  } while (ExclusiveStartKey);
+  return items;
+}
 
 /**
  * Reads a villa's wide item from any table shaped like Actual_dates:
