@@ -11,8 +11,18 @@ const HIGHLIGHT_COLOR = "#ea580c"; // safety-orange accent, consistent with the 
 // parcel size varies a lot across the site and a single zoom threshold
 // either hides labels somewhere they'd fit, or shows them somewhere they
 // still overlap.
-const LABEL_MIN_WIDTH_PX = 45;
-const LABEL_MIN_HEIGHT_PX = 24;
+// Sized against the actual on-screen font (9px bold, see
+// .villa-label-tooltip below): a 4-digit number at 9px bold is roughly
+// 21-24px wide and the line itself is ~11-13px tall, so these are close
+// to the real floor rather than the old 45x24 margin, which was holding
+// labels back a full extra zoom step past where they'd already read
+// fine. Lowered twice now after feedback that labels still weren't
+// appearing on some parcels at a zoom level where they'd clearly fit —
+// paired with shrinking the tooltip font itself (11px -> 9px) so
+// there's less to fit, both together should surface labels noticeably
+// earlier without them overlapping.
+const LABEL_MIN_WIDTH_PX = 16;
+const LABEL_MIN_HEIGHT_PX = 9;
 
 // Export mode (forceAllLabels) needs a MUCH smaller threshold, paired
 // with a much smaller font (see .pdf-export-mode .villa-label-tooltip in
@@ -211,9 +221,20 @@ export function VillaLayer({
     const villaID = feature.properties?.villaID;
     if (!villaID || villaID === "NOT_VILLA") return; // not a real villa — no click, no label
 
-    const villanum = feature.properties?.villanum;
-    if (villanum && villanum !== "NOT_VILLA") {
-      layer.bindTooltip(String(villanum), {
+    // Normally villanum ("40") mirrors villaID ("V_40") exactly, but a
+    // handful of real, clickable villas turned up with a missing or
+    // stale villanum despite a perfectly valid villaID — invisible on
+    // the map at any zoom even though the popup (driven by villaID)
+    // opened fine. Rather than depend on villanum being trustworthy,
+    // fall back to stripping any leading non-digits off villaID itself
+    // so the same identifier that already proved reliable for clicks
+    // also guarantees a label.
+    const rawVillanum = feature.properties?.villanum;
+    const derivedFromID = String(villaID).replace(/^\D+/, "");
+    const labelText = rawVillanum && rawVillanum !== "NOT_VILLA" ? String(rawVillanum) : derivedFromID;
+
+    if (labelText) {
+      layer.bindTooltip(labelText, {
         permanent: true,
         direction: "center",
         className: "villa-label-tooltip",

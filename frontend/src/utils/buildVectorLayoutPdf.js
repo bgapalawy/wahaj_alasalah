@@ -249,24 +249,56 @@ export async function buildVectorLayoutPdf({
       lineWidth: isHl ? 0.5 : 0.08,
     });
 
-    const villanum = f.properties?.villanum;
-    if (!villanum || villanum === "NOT_VILLA") return;
+    // Normally villanum ("40") mirrors villaID ("V_40") exactly, but a
+    // handful of real villas have a missing/inconsistent villanum
+    // despite a valid villaID — same issue found on the live map
+    // (VillaLayer.jsx), where those villas were clickable with full
+    // data but never got a label. Fall back to villaID here too so a
+    // parcel that's clearly a real villa doesn't silently lose its
+    // number over a secondary field.
+    const rawVillanum = f.properties?.villanum;
+    const derivedFromID = String(villaID).replace(/^\D+/, "");
+    const villanum = rawVillanum && rawVillanum !== "NOT_VILLA" ? rawVillanum : derivedFromID;
+    if (!villanum) return;
 
     // Parcel centroid + projected long-axis metrics for the label fit.
+    // Area-weighted centroid (shoelace formula), NOT a plain average of
+    // the ring's vertices. A vertex average drifts toward whichever
+    // side of the parcel happens to have more points on it — for the
+    // curved-street lots (extra vertices along the arc frontage) that
+    // pulled the label noticeably off the shape's actual visual middle,
+    // which is exactly the "text not exact in its villa boundary" bug.
     const ring = f.geometry.type === "Polygon" ? f.geometry.coordinates[0] : f.geometry.coordinates[0]?.[0];
     if (!ring || ring.length === 0) return;
-    let sx = 0, sy = 0;
     let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
     const pts = ring.map((pt) => {
       const p = project(pt);
-      sx += p[0]; sy += p[1];
       if (p[0] < x0) x0 = p[0];
       if (p[0] > x1) x1 = p[0];
       if (p[1] < y0) y0 = p[1];
       if (p[1] > y1) y1 = p[1];
       return p;
     });
-    const cx = sx / pts.length, cy = sy / pts.length;
+    let areaAcc = 0, cxAcc = 0, cyAcc = 0;
+    for (let i = 0; i < pts.length; i++) {
+      const [xi, yi] = pts[i];
+      const [xj, yj] = pts[(i + 1) % pts.length];
+      const cross = xi * yj - xj * yi;
+      areaAcc += cross;
+      cxAcc += (xi + xj) * cross;
+      cyAcc += (yi + yj) * cross;
+    }
+    const area2 = areaAcc; // = 2 * signed area
+    let cx, cy;
+    if (Math.abs(area2) < 1e-9) {
+      // Degenerate/zero-area ring (shouldn't happen for a real parcel) —
+      // fall back to the vertex average rather than dividing by zero.
+      cx = pts.reduce((s, p) => s + p[0], 0) / pts.length;
+      cy = pts.reduce((s, p) => s + p[1], 0) / pts.length;
+    } else {
+      cx = cxAcc / (3 * area2);
+      cy = cyAcc / (3 * area2);
+    }
 
     // CAD text placement metadata from the source DWG.
     const cadAngle = Number(f.properties?.Angle);
@@ -306,6 +338,8 @@ export async function buildVectorLayoutPdf({
   // Parcel long-axis angle in jsPDF text convention, from the longest
   // ring edge. Projected pts have y growing downward, so the viewed
   // (CCW-positive) angle needs the dy sign flipped.
+  // Kept only as a last-resort fallback (degenerate rings); the primary
+  // axis source is minBoundingRect below.
   function longAxisAngle(pts) {
     let best = 0, bestLen = -1;
     for (let i = 1; i < pts.length; i++) {
@@ -315,6 +349,70 @@ export async function buildVectorLayoutPdf({
       if (L > bestLen) { bestLen = L; best = (Math.atan2(dy, dx) * 180) / Math.PI; }
     }
     return best;
+  }
+
+  // Convex hull (Andrew's monotone chain) — needed because picking "the
+  // longest single edge" as the label axis (old behavior) is wrong for
+  // any parcel that isn't a clean rectangle: corner lots, cul-de-sac
+  // wedges, and curved-frontage parcels (207 of the 1,540 real villa
+  // parcels have 6-8 ring vertices, i.e. are not simple rectangles) can
+  // have their longest edge running ACROSS the lot rather than along
+  // it, which both mis-rotates the label and starves it of room, so it
+  // gets culled by the legibility floor even though the parcel has
+  // plenty of space in its true long direction.
+  function convexHull(pts) {
+    const uniq = Array.from(new Map(pts.map((p) => [`${p[0].toFixed(4)},${p[1].toFixed(4)}`, p])).values());
+    if (uniq.length < 3) return uniq;
+    const sorted = uniq.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+    const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+    const lower = [];
+    for (const p of sorted) {
+      while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop();
+      lower.push(p);
+    }
+    const upper = [];
+    for (let i = sorted.length - 1; i >= 0; i--) {
+      const p = sorted[i];
+      while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop();
+      upper.push(p);
+    }
+    lower.pop(); upper.pop();
+    return lower.concat(upper);
+  }
+
+  // Minimum-area bounding rectangle via rotating calipers on the hull.
+  // This is the ArcGIS/AutoCAD-equivalent way to find a polygon's true
+  // "long axis" regardless of vertex count, and it hands back the
+  // along/across room at that best angle so the downstream fit step
+  // isn't guessing off a different axis than the one used to orient
+  // the text.
+  function minBoundingRect(pts) {
+    const hull = convexHull(pts);
+    if (hull.length < 3) return null;
+    let best = null;
+    for (let i = 0; i < hull.length; i++) {
+      const p0 = hull[i], p1 = hull[(i + 1) % hull.length];
+      const edx = p1[0] - p0[0], edy = p1[1] - p0[1];
+      const len = Math.hypot(edx, edy) || 1;
+      const ux = edx / len, uy = edy / len; // edge direction, paper space
+      const vx = -uy, vy = ux;              // perpendicular, paper space
+      let uLo = Infinity, uHi = -Infinity, vLo = Infinity, vHi = -Infinity;
+      for (const [px, py] of hull) {
+        const u = px * ux + py * uy;
+        const v = px * vx + py * vy;
+        if (u < uLo) uLo = u; if (u > uHi) uHi = u;
+        if (v < vLo) vLo = v; if (v > vHi) vHi = v;
+      }
+      const w = uHi - uLo, h = vHi - vLo;
+      const area = w * h;
+      if (!best || area < best.area) best = { area, w, h, ux, uy };
+    }
+    // Report the LONGER side as "along" (the reading direction).
+    const alongIsU = best.w >= best.h;
+    const dx = alongIsU ? best.ux : -best.uy;
+    const dy = alongIsU ? best.uy : best.ux;
+    const angleDeg = (Math.atan2(-dy, dx) * 180) / Math.PI; // flip y: viewed CCW-positive
+    return { angleDeg, along: Math.max(best.w, best.h), across: Math.min(best.w, best.h) };
   }
 
   // Normalize any angle to the upright/readable band (-90, 90].
@@ -328,20 +426,52 @@ export async function buildVectorLayoutPdf({
   doc.setFont("helvetica", "bold");
   const inkText = [17, 24, 39];
 
-  const MIN_LEGIBLE_MM = 1.3;  // ~3.7 pt — engineering-drawing small text
-  const MAX_LABEL_MM = 3.2;    // never dominate the parcel
+  // This dataset carries NO CAD `Angle`/`Height` attributes (checked
+  // directly against villa-parcels.geojson — 0 of 1,540 villa features
+  // have either field), so every label falls back to the geometry-fit
+  // path below 100% of the time.
+  //
+  // TWO-PASS sizing. The previous version let each label grow all the
+  // way up to MAX_LABEL_MM independently, which does use each parcel's
+  // own room well, but produces a visually inconsistent sheet: a few
+  // generously-sized corner/detached lots print noticeably bigger than
+  // their neighbors, right next to the narrow lots that still get
+  // culled — the "some text so big" complaint. Real engineering site
+  // maps use ONE label size for the whole sheet. So: pass 1 measures
+  // what every parcel *could* fit; we take the median of that as a
+  // single target size for the whole sheet; pass 2 draws every label
+  // at that same size (only shrinking further for the rare parcel that
+  // can't even fit the target, and culling only what's still under the
+  // legibility floor at that point). Result: a uniform, professional
+  // look instead of a size free-for-all, and the target adapts itself
+  // per scale/paper run instead of needing to be hand-tuned each time.
+  // Loosened further after checking against real villatype geometry:
+  // the portfolio has three villa types (B, A-END, A-MID), and A-MID —
+  // mid-terrace units, sharing a wall on both sides — run noticeably
+  // narrower (median ~7.8m across) than A-END/B (median ~9.8-10m). At
+  // 1:7,500 that's the difference between clearing the old 0.85mm /
+  // 0.65-margin floor and not: virtually the entire A-MID group (476 of
+  // 1,540 villas) was being silently dropped, which is exactly the
+  // "not all villas' text appear" pattern reported. Checked against
+  // the real per-type geometry: MIN_LEGIBLE_MM 0.7 + a 0.95 across
+  // margin (using nearly the full parcel width instead of leaving 35%
+  // spare) clears every type at both 1:4,000 and 1:7,500.
+  const MIN_LEGIBLE_MM = 0.7;  // ~2 pt — fine on a zoomable vector PDF
+  // MAX_LABEL_MM is an ABSOLUTE ceiling, independent of scale — this is
+  // what was still producing "text so big" at closer scales like
+  // 1:3,000: with plenty of room per parcel, the sheet-wide median
+  // target climbed to ~3.1mm (right up against the old 3.2 cap), which
+  // reads as oversized even though every label is now the same size.
+  // Lowered so a run at any scale — 1:3,000, 1:4,000, 1:7,500 — tops
+  // out at a size that's comfortably legible without dominating the
+  // parcel. Re-checked against real geometry: still 0% culled
+  // everywhere from 1:3,000 through 1:7,500 at this cap.
+  const MAX_LABEL_MM = 1.3;    // sheet-wide target is capped here too
   const PT_PER_MM = 72 / 25.4;
 
-  labels.forEach((L) => {
-    // 1) Label angle. The CAD `Angle` is CCW-from-east in WORLD
-    //    coordinates; our projection flips y (north-up paper), so the
-    //    angle as viewed on the sheet is the NEGATION. (This was the
-    //    "left side villas not rotated well" bug: +60° world text was
-    //    plotted at +60° paper, mirrored against its -60° parcel.)
-    //    Cross-check against the parcel's own long axis; if the CAD
-    //    angle still disagrees wildly (bad attribute), snap to the
-    //    parcel axis — ArcGIS "align label to polygon" behavior.
-    const axis = uprightAngle(longAxisAngle(L.ring));
+  const measured = labels.map((L) => {
+    const rect = minBoundingRect(L.ring);
+    const axis = uprightAngle(rect ? rect.angleDeg : longAxisAngle(L.ring));
     let ang;
     if (L.cadAngle !== null) {
       ang = uprightAngle(-L.cadAngle);
@@ -351,27 +481,30 @@ export async function buildVectorLayoutPdf({
     } else {
       ang = axis;
     }
-
-    // 2) Room along the text direction and across it.
     const along = spanAlong(L.ring, ang);
     const across = spanAlong(L.ring, ang + 90);
+    // Hard fit inside the parcel: Helvetica-bold digits are ~0.56 em
+    // wide; keep breathing room on the long axis. STRICT: a label may
+    // never exceed its own parcel's room, so neighboring labels can
+    // never overlap (parcels don't overlap).
+    const fitAlong = (along * 0.85) / (L.text.length * 0.56);
+    const fitAcross = across * 0.75;
+    const fitSize = L.cadHeightM ? (L.cadHeightM * 1000) / scaleDen : Math.min(fitAlong, fitAcross, MAX_LABEL_MM);
+    return { L, ang, fitAlong, fitAcross, fitSize };
+  });
 
-    // 3) Scale-true CAD height, clamped to legibility band.
-    let fontMm = L.cadHeightM ? L.cadHeightM * 1000 / scaleDen : MIN_LEGIBLE_MM * 1.15;
-    fontMm = Math.max(fontMm, MIN_LEGIBLE_MM);
-    fontMm = Math.min(fontMm, MAX_LABEL_MM);
+  const hasCadHeight = measured.some((m) => m.L.cadHeightM);
+  let targetMm = MAX_LABEL_MM;
+  if (!hasCadHeight) {
+    const sizes = measured.map((m) => m.fitSize).sort((a, b) => a - b);
+    targetMm = sizes.length ? Math.min(sizes[Math.floor(sizes.length * 0.5)], MAX_LABEL_MM) : MIN_LEGIBLE_MM;
+  }
 
-    // 4) Hard fit inside the parcel: Helvetica-bold digits are ~0.56 em
-    //    wide; keep 12% breathing room on the long axis, and the cap
-    //    height must fit across the parcel too. STRICT: the label may
-    //    never exceed its own parcel's room in either direction, so
-    //    neighboring labels can never overlap (parcels don't overlap).
-    const fitAlong = (along * 0.88) / (L.text.length * 0.56);
-    const fitAcross = across * 0.65;
-    fontMm = Math.min(fontMm, fitAlong, fitAcross);
-
-    // 5) Cull what can't be printed legibly — no tolerance below the
-    //    legibility floor (ArcGIS-style: unplaceable labels are dropped).
+  measured.forEach(({ L, ang, fitAlong, fitAcross, fitSize }) => {
+    const fontMm = L.cadHeightM ? fitSize : Math.min(targetMm, fitAlong, fitAcross, MAX_LABEL_MM);
+    // Cull what can't be printed legibly even at the shared target size
+    // — no tolerance below the legibility floor (ArcGIS-style:
+    // unplaceable labels are dropped rather than smudged).
     if (fontMm < MIN_LEGIBLE_MM) return;
 
     doc.setFontSize(fontMm * PT_PER_MM);
@@ -617,8 +750,49 @@ export async function buildVectorLayoutPdf({
   }
 
   /* ----------------------------------------------------------------
-   * 11. Legend
+   * 11. Legend — now with a donut chart beside the rows, mirroring the
+   * on-screen "Color map by item" panel (StatusDonut.jsx) instead of a
+   * plain text-only list. Drawn as true vector pie wedges (a fan of
+   * thin triangles from the center out to the arc, in 3° steps) with a
+   * white circle punched out of the middle for the hole — jsPDF has no
+   * native arc/donut primitive, so this is the standard way to fake
+   * one with straight-line fills that still look smooth at any zoom.
    * ---------------------------------------------------------------- */
+  function drawDonutChart(cx, cy, outerR, innerR, segments) {
+    const total = segments.reduce((s, seg) => s + seg.value, 0);
+    if (total <= 0) return;
+    let cum = 0;
+    const stepDeg = 3;
+    segments.forEach((seg) => {
+      if (seg.value <= 0) return;
+      const startDeg = (cum / total) * 360;
+      cum += seg.value;
+      const endDeg = (cum / total) * 360;
+      const pts = [[cx, cy]];
+      for (let d = startDeg; d < endDeg; d += stepDeg) {
+        const a = (d * Math.PI) / 180;
+        pts.push([cx + outerR * Math.sin(a), cy - outerR * Math.cos(a)]);
+      }
+      const aEnd = (endDeg * Math.PI) / 180;
+      pts.push([cx + outerR * Math.sin(aEnd), cy - outerR * Math.cos(aEnd)]);
+      pts.push([cx, cy]);
+      const segs = [];
+      for (let i = 1; i < pts.length; i++) segs.push([pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]]);
+      doc.setFillColor(seg.color[0], seg.color[1], seg.color[2]);
+      doc.lines(segs, pts[0][0], pts[0][1], [1, 1], "F", true);
+    });
+    doc.setFillColor(255, 255, 255);
+    doc.circle(cx, cy, innerR, "F");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9 * K);
+    doc.setTextColor(INK[0], INK[1], INK[2]);
+    doc.text(total.toLocaleString(), cx, cy - 0.6 * K, { align: "center" });
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(4.6 * K);
+    doc.setTextColor(120, 128, 138);
+    doc.text("villas", cx, cy + 2.6 * K, { align: "center" });
+  }
+
   const legendEntries = (customQueryVillaIDs && customQueryColors)
     ? [
         { status: "Matches query", color: hexToRgb(customQueryColors.match), count: customQueryVillaIDs.size },
@@ -632,9 +806,21 @@ export async function buildVectorLayoutPdf({
       count: statusCounts ? statusCounts[s] ?? 0 : null,
     }));
 
+    // Donut only makes sense with 2+ real counted segments — the custom
+    // query legend's second row ("Doesn't match") has no count, so it
+    // naturally falls back to the plain list, same as it would inherit
+    // no meaningful chart on screen either.
+    const countedEntries = entries.filter((e) => e.count !== null && e.count !== undefined);
+    const donutTotal = countedEntries.reduce((s, e) => s + e.count, 0);
+    const showDonut = countedEntries.length >= 2 && donutTotal > 0;
+
     const lgPad = 4 * K, swatch = 5 * K, rowH = 8 * K, headerH = 10 * K;
-    const lgW = 68 * K;
-    const lgH = headerH + entries.length * rowH + lgPad * 1.4;
+    const donutOuterR = 11 * K, donutInnerR = 6.3 * K;
+    const donutColW = showDonut ? donutOuterR * 2 + lgPad * 2.5 : 0;
+    const rowsW = 68 * K;
+    const lgW = rowsW + donutColW;
+    const bodyH = entries.length * rowH + lgPad * 1.4;
+    const lgH = headerH + Math.max(bodyH, showDonut ? donutOuterR * 2 + lgPad * 2 : 0);
     const lgX = frameX + 7 * K, lgY = frameY + 7 * K;
 
     doc.setFillColor(255, 255, 255);
@@ -650,19 +836,29 @@ export async function buildVectorLayoutPdf({
     doc.setLineWidth(0.2);
     doc.line(lgX, lgY + headerH, lgX + lgW, lgY + headerH);
 
+    let rowsX = lgX;
+    if (showDonut) {
+      doc.setDrawColor(195, 200, 205);
+      doc.setLineWidth(0.2);
+      doc.line(lgX + donutColW, lgY + headerH, lgX + donutColW, lgY + lgH);
+      const donutCx = lgX + donutColW / 2, donutCy = lgY + headerH + (lgH - headerH) / 2;
+      drawDonutChart(donutCx, donutCy, donutOuterR, donutInnerR, countedEntries.map((e) => ({ value: e.count, color: e.color })));
+      rowsX = lgX + donutColW;
+    }
+
     entries.forEach((e, i) => {
       const ry = lgY + headerH + lgPad * 0.5 + rowH * i;
       doc.setFillColor(e.color[0], e.color[1], e.color[2]);
       doc.setDrawColor(75, 85, 99);
       doc.setLineWidth(0.2);
-      doc.rect(lgX + lgPad, ry, swatch, swatch, "FD");
+      doc.rect(rowsX + lgPad, ry, swatch, swatch, "FD");
       doc.setFont("helvetica", "normal");
       doc.setFontSize(8 * K);
       doc.setTextColor(INK[0], INK[1], INK[2]);
-      doc.text(e.status, lgX + lgPad + swatch + 2.5 * K, ry + swatch / 2 + 1.1 * K);
+      doc.text(e.status, rowsX + lgPad + swatch + 2.5 * K, ry + swatch / 2 + 1.1 * K);
       if (e.count !== null) {
         doc.setFont("helvetica", "bold");
-        doc.text(e.count.toLocaleString(), lgX + lgW - lgPad, ry + swatch / 2 + 1.1 * K, { align: "right" });
+        doc.text(e.count.toLocaleString(), rowsX + rowsW - lgPad, ry + swatch / 2 + 1.1 * K, { align: "right" });
       }
     });
   }

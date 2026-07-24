@@ -34,15 +34,28 @@ export function PlannedDatesDisplay({ villaID, tableItemId }) {
   if (status === "loading") return <p className="planned-dates-hint">Loading item details…</p>;
   if (status === "error") return null;
 
+  const plannedCost = data?.plannedCost;
+  const actualCost = data?.actualCost;
+  const hasActual = actualCost !== null && actualCost !== undefined;
+  const overBudget = hasActual && plannedCost !== null && plannedCost !== undefined && actualCost > plannedCost;
+
   return (
     <div className="planned-dates-display">
       <p>
         Planned: <strong>{data?.plannedStartDate ?? "—"}</strong> → <strong>{data?.plannedFinishDate ?? "—"}</strong>
       </p>
-      <p>
-        Planned Cost: <strong>{formatCurrency(data?.plannedCost)}</strong> · Actual Cost:{" "}
-        <strong>{formatCurrency(data?.actualCost)}</strong>
-      </p>
+      <div className="planned-cost-rows">
+        <div className="planned-cost-row">
+          <span className="planned-cost-label">Planned Cost</span>
+          <strong className="planned-cost-value">{formatCurrency(plannedCost)}</strong>
+        </div>
+        <div className="planned-cost-row">
+          <span className="planned-cost-label">Actual Cost</span>
+          <strong className={`planned-cost-value ${overBudget ? "is-over-budget" : ""}`}>
+            {formatCurrency(actualCost)}
+          </strong>
+        </div>
+      </div>
     </div>
   );
 }

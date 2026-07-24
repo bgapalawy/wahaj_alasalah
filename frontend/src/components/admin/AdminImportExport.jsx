@@ -148,67 +148,71 @@ export function AdminImportExport() {
         ⚠ This directly writes to your real database. Double-check the table and sheet before uploading — there's no undo.
       </p>
 
-      <div className="admin-field">
-        <label>Table</label>
-        <select value={selectedTable} onChange={(e) => setSelectedTable(e.target.value)}>
-          <option value="">— Select a table —</option>
-          {tableOptions.map((t) => (
-            <option key={t.value} value={t.value}>
-              {t.label}
-            </option>
-          ))}
-        </select>
-      </div>
+      <div className="admin-fields">
+        <div className="admin-field">
+          <label>Table</label>
+          <select value={selectedTable} onChange={(e) => setSelectedTable(e.target.value)}>
+            <option value="">— Select a table —</option>
+            {tableOptions.map((t) => (
+              <option key={t.value} value={t.value}>
+                {t.label}
+              </option>
+            ))}
+          </select>
+        </div>
 
-      <div className="admin-field">
-        <label>Sheet/tab name in your Excel file</label>
-        <input
-          type="text"
-          value={sheetName}
-          onChange={(e) => setSheetName(e.target.value)}
-          placeholder="e.g. Sheet1"
-        />
-      </div>
+        <div className="admin-field">
+          <label>Sheet/tab name in your Excel file</label>
+          <input
+            type="text"
+            value={sheetName}
+            onChange={(e) => setSheetName(e.target.value)}
+            placeholder="e.g. Sheet1"
+          />
+        </div>
 
-      <div className="admin-field">
-        <label>Excel file</label>
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".xlsx,.xls,.xlsm"
-          onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-        />
-      </div>
+        <div className="admin-field">
+          <label>Excel file</label>
+          <div className="admin-file-input">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".xlsx,.xls,.xlsm"
+              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+            />
+          </div>
+        </div>
 
-      <div className="admin-actions">
-        <button type="button" onClick={handleImport} disabled={importStatus === "working"}>
-          {importStatus === "working" ? "Uploading…" : "Upload to Database"}
-        </button>
-        <button type="button" onClick={handleExport} disabled={exportStatus === "working"}>
-          {exportStatus === "working" ? "Preparing…" : "Download Table Data"}
-        </button>
-      </div>
+        <div className="admin-actions">
+          <button type="button" className="admin-btn-primary" onClick={handleImport} disabled={importStatus === "working"}>
+            {importStatus === "working" ? "Uploading…" : "Upload to Database"}
+          </button>
+          <button type="button" className="admin-btn-secondary" onClick={handleExport} disabled={exportStatus === "working"}>
+            {exportStatus === "working" ? "Preparing…" : "Download Table Data"}
+          </button>
+        </div>
 
-      {importStatus === "done" && importResult && (
-        <p className="admin-result">
-          Upload complete. Successful: {importResult.successCount}, Errors: {importResult.errorCount}
-          {importResult.errors.length > 0 && (
-            <>
-              <br />
-              First error: {importResult.errors[0].villaID} — {importResult.errors[0].error}
-            </>
-          )}
-        </p>
-      )}
-      {importStatus === "error" && <p className="admin-result admin-result-error">{importError}</p>}
+        {importStatus === "done" && importResult && (
+          <p className="admin-result">
+            Upload complete. Successful: {importResult.successCount}, Errors: {importResult.errorCount}
+            {importResult.errors.length > 0 && (
+              <>
+                <br />
+                First error: {importResult.errors[0].villaID} — {importResult.errors[0].error}
+              </>
+            )}
+          </p>
+        )}
+        {importStatus === "error" && <p className="admin-result admin-result-error">{importError}</p>}
+      </div>
 
       <div className="admin-convert-section">
         <h4>Bulk invoice fixes</h4>
         <div className="admin-actions">
-          <button type="button" onClick={handleConvertReadyToPayToPaid} disabled={convertStatus === "working"}>
+          <button type="button" className="admin-btn-warning" onClick={handleConvertReadyToPayToPaid} disabled={convertStatus === "working"}>
             Convert all ReadyToPay → Paid
           </button>
-          <button type="button" onClick={handleConvertCompletedToReadyToPay} disabled={convertStatus === "working"}>
+          <button type="button" className="admin-btn-warning" onClick={handleConvertCompletedToReadyToPay} disabled={convertStatus === "working"}>
             Backfill: Completed → ReadyToPay
           </button>
         </div>

@@ -80,7 +80,11 @@ export function MapItemColorControl({
   onSetColumnColor,
   onResetColumnColors,
 }) {
-  const [collapsed, setCollapsed] = useState(false);
+  // Starts collapsed: at 320px wide with unbounded height, this panel
+  // covers most of a phone-width viewport when expanded (see the "takes
+  // more area" complaint) — better to open on demand than to greet
+  // every session with the map half-hidden.
+  const [collapsed, setCollapsed] = useState(true);
   const { handleRef, style: dragStyle } = useDraggable();
   const total = Object.values(statusCounts).reduce((sum, n) => sum + n, 0);
 
@@ -136,6 +140,8 @@ export function MapItemColorControl({
             <ConstructionItemSelect value={selectedItem} onChange={onChange} />
           )}
 
+          {loading && <LoadingRing label="Loading…" />}
+
           {colorMode === "column" && selectedSpecialQueryColumn && (
             <MultiSelect
               label="Values"
@@ -154,57 +160,68 @@ export function MapItemColorControl({
 
           {selectedItem &&
             (blockOptions.length > 0 || zoneOptions.length > 0 || villaOptions.length > 0 || villaTypeOptions.length > 0) && (
-              <div className="map-item-color-filters">
-                {/* Zone > Block > Villa hierarchy — Zone first narrows Block's
-                    options, Block then narrows Villa's (handled in MapView). */}
-                {zoneOptions.length > 0 && (
-                  <MultiSelect label="Zone" options={zoneOptions} value={selectedZones} onChange={onZonesChange} />
-                )}
-                {blockOptions.length > 0 && (
-                  <MultiSelect label="Block" options={blockOptions} value={selectedBlocks} onChange={onBlocksChange} />
-                )}
-                {villaTypeOptions.length > 0 && (
-                  <MultiSelect
-                    label="Villa Type"
-                    options={villaTypeOptions}
-                    value={selectedVillaTypes}
-                    onChange={onVillaTypesChange}
-                  />
-                )}
-                {villaOptions.length > 0 && (
-                  <MultiSelect label="Villa" options={villaOptions} value={selectedVillas} onChange={onVillasChange} />
-                )}
-              </div>
-            )}
+              <details className="filters-section">
+                <summary>
+                  Filters
+                  {(() => {
+                    const activeCount =
+                      selectedZones.length + selectedBlocks.length + selectedVillaTypes.length + selectedVillas.length +
+                      highlightZones.length + highlightBlocks.length;
+                    return activeCount > 0 ? ` (${activeCount} active)` : "";
+                  })()}
+                </summary>
+                <div className="map-item-color-filters">
+                  {/* Zone > Block > Villa hierarchy — Zone first narrows Block's
+                      options, Block then narrows Villa's (handled in MapView). */}
+                  {zoneOptions.length > 0 && (
+                    <MultiSelect label="Zone" options={zoneOptions} value={selectedZones} onChange={onZonesChange} />
+                  )}
+                  {blockOptions.length > 0 && (
+                    <MultiSelect label="Block" options={blockOptions} value={selectedBlocks} onChange={onBlocksChange} />
+                  )}
+                  {villaTypeOptions.length > 0 && (
+                    <MultiSelect
+                      label="Villa Type"
+                      options={villaTypeOptions}
+                      value={selectedVillaTypes}
+                      onChange={onVillaTypesChange}
+                    />
+                  )}
+                  {villaOptions.length > 0 && (
+                    <MultiSelect label="Villa" options={villaOptions} value={selectedVillas} onChange={onVillasChange} />
+                  )}
+                </div>
 
-          {(blockOptions.length > 0 || zoneOptions.length > 0) && (
-            <div className="map-highlight-row">
-              <span className="map-highlight-label">Highlight:</span>
-              {zoneOptions.length > 0 && (
-                <MultiSelect label="Zone" options={zoneOptions} value={highlightZones} onChange={onHighlightZonesChange} />
-              )}
-              {highlightBlockOptions.length > 0 && (
-                <MultiSelect
-                  label="Block"
-                  options={highlightBlockOptions}
-                  value={highlightBlocks}
-                  onChange={onHighlightBlocksChange}
-                />
-              )}
-              {(highlightBlocks.length > 0 || highlightZones.length > 0) && (
-                <button
-                  type="button"
-                  className="map-item-color-clear"
-                  onClick={() => {
-                    onHighlightBlocksChange([]);
-                    onHighlightZonesChange([]);
-                  }}
-                >
-                  Clear
-                </button>
-              )}
-            </div>
-          )}
+                {(blockOptions.length > 0 || zoneOptions.length > 0) && (
+                  <div className="map-highlight-row">
+                    <span className="map-highlight-label">Highlight:</span>
+                    {zoneOptions.length > 0 && (
+                      <MultiSelect label="Zone" options={zoneOptions} value={highlightZones} onChange={onHighlightZonesChange} />
+                    )}
+                    {highlightBlockOptions.length > 0 && (
+                      <MultiSelect
+                        label="Block"
+                        options={highlightBlockOptions}
+                        value={highlightBlocks}
+                        onChange={onHighlightBlocksChange}
+                      />
+                    )}
+                    {(highlightBlocks.length > 0 || highlightZones.length > 0) && (
+                      <button
+                        type="button"
+                        className="map-item-color-clear"
+                        onClick={() => {
+                          onHighlightBlocksChange([]);
+                          onHighlightZonesChange([]);
+                        }}
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
+                )}
+              </details>
+            )}
 
           <details className="custom-query-section">
             <summary>
@@ -239,8 +256,6 @@ export function MapItemColorControl({
             <input type="checkbox" checked={showBoundary} onChange={(e) => onShowBoundaryChange(e.target.checked)} />
             Show project boundary
           </label>
-
-          {loading && <LoadingRing label="Loading…" />}
 
           {(remainingCount !== null || totalProjectVillas !== null) && (
             <div className="map-badge-row">
