@@ -31,6 +31,12 @@ export default function App() {
   // block, scale bar, grid) to the chosen ISO size.
   const [paperSize, setPaperSize] = useState("a1");
   const mapViewRef = useRef(null);
+  // Bumped whenever a save happens in the villa panel (activity status
+  // or invoice status) — MapView's color-data hooks include this in
+  // their fetch dependencies, so the map picks up the change immediately
+  // instead of only reflecting it after a hard page reload.
+  const [dataRefreshKey, setDataRefreshKey] = useState(0);
+  const bumpDataRefresh = () => setDataRefreshKey((k) => k + 1);
 
   // Direct PDF download — TRUE VECTOR. buildVectorLayoutPdf draws the
   // whole layout sheet (parcels, labels, frame, graticule, title block,
@@ -122,11 +128,13 @@ export default function App() {
           onVillaClick={setSelectedVillaID}
           colorByItem={colorByItem}
           onColorByItemChange={setColorByItem}
+          refreshKey={dataRefreshKey}
         />
         <VillaDetailsPanel
           villaID={selectedVillaID}
           onClose={() => setSelectedVillaID(null)}
           initialConstructionItem={colorByItem}
+          onDataChanged={bumpDataRefresh}
         />
       </main>
 

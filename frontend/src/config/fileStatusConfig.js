@@ -27,3 +27,18 @@ export function buildSlotPrefix({ constructionItemId, villaID, state, slotIndex 
   const suffix = state === "Approval" ? "Approval" : `${state}${slotIndex + 1}`;
   return `${constructionItemId}-VillaID:${villaID}-${suffix}`;
 }
+
+/**
+ * Human-readable filename for display and download — NOT used for the
+ * actual S3 key (that stays buildSlotPrefix's stable ID-based string, so
+ * existing uploaded files remain findable; changing the storage key
+ * itself would orphan every file already uploaded under the old naming).
+ * This is purely what the user sees and what a downloaded file gets
+ * named, via S3's ResponseContentDisposition (see uploadService.js).
+ */
+export function buildFriendlyFileName({ constructionItemName, villaID, state, slotIndex, extension }) {
+  const suffix = state === "Approval" ? "Approval" : `${state}${slotIndex + 1}`;
+  const safeName = (constructionItemName ?? "Item").replace(/[\\/:*?"<>|]/g, "-");
+  const ext = extension ? `.${extension}` : "";
+  return `${safeName} - Villa ${villaID} - ${suffix}${ext}`;
+}

@@ -8,7 +8,7 @@ import { formatCurrency } from "../../utils/dashboardUtils.js";
  * tiny endpoint, no chart libraries) since it just needs to show next to
  * the item picker.
  */
-export function PlannedDatesDisplay({ villaID, tableItemId }) {
+export function PlannedDatesDisplay({ villaID, tableItemId, refreshKey = 0 }) {
   const [data, setData] = useState(null);
   const [status, setStatus] = useState("loading");
 
@@ -29,7 +29,7 @@ export function PlannedDatesDisplay({ villaID, tableItemId }) {
     return () => {
       cancelled = true;
     };
-  }, [villaID, tableItemId]);
+  }, [villaID, tableItemId, refreshKey]);
 
   if (status === "loading") return <p className="planned-dates-hint">Loading item details…</p>;
   if (status === "error") return null;

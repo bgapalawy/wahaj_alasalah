@@ -1,40 +1,58 @@
-import { UpdateCommand } from "@aws-sdk/lib-dynamodb";
-import { ddb, tables } from "../config/aws.js";
-import { getVillaWideItem, getManyVillaWideItems } from "./wideTableService.js";
+import { query } from "../config/postgres.js";
 
 /**
  * Invoice status per villa/construction item — the original app's
- * "monitoring type 3" (Invoice) view. Same plain-string wide-table shape
- * as wajhaData: { villaID, "Civil-1": "ReadyToPay", "Civil-2": "Paid", ... }.
- * Valid values (matching the original statusColorMapInvoice):
- * NotStarted, InProgress, ReadyToPay, Paid.
+ * "monitoring type 3" (Invoice) view. Valid values (matching the
+ * original statusColorMapInvoice): NotStarted, InProgress, ReadyToPay,
+ * Paid.
+ *
+ * MIGRATED to Postgres — reads/writes villa_item_invoice instead of the
+ * DynamoDB wide invoice table. Migrated together with
+ * activityStatusService.js in the same step since
+ * autoUpdateInvoiceOnCompletion() below is called directly from that
+ * file's updateActivityStatus() — splitting the write paths across two
+ * different databases mid-transaction would risk exactly the kind of
+ * silent inconsistency flagged in villaService.js's migration notes.
  */
 
 export async function getInvoiceStatus(villaID, tableItemId) {
-  const item = await getVillaWideItem(tables.invoices, villaID);
-  return item[tableItemId] ?? "NotStarted";
+  const { rows } = await query(
+    `SELECT status FROM villa_item_invoice WHERE villa_id = $1 AND table_item_id = $2`,
+    [villaID, tableItemId]
+  );
+  return rows[0]?.status ?? "NotStarted";
 }
 
 export async function getAllInvoiceStatuses(villaID) {
-  return getVillaWideItem(tables.invoices, villaID);
+  const { rows } = await query(
+    `SELECT table_item_id, status FROM villa_item_invoice WHERE villa_id = $1`,
+    [villaID]
+  );
+  const result = {};
+  rows.forEach((r) => { result[r.table_item_id] = r.status; });
+  return result;
 }
 
 export async function getManyInvoiceStatuses(villaIDs) {
-  return getManyVillaWideItems(tables.invoices, villaIDs);
+  const { rows } = await query(
+    `SELECT villa_id, table_item_id, status FROM villa_item_invoice WHERE villa_id = ANY($1)`,
+    [villaIDs]
+  );
+  const result = {};
+  villaIDs.forEach((id) => { result[id] = {}; });
+  rows.forEach((r) => { result[r.villa_id][r.table_item_id] = r.status; });
+  return result;
 }
 
 export async function updateInvoiceStatus(villaID, tableItemId, status) {
-  const result = await ddb.send(
-    new UpdateCommand({
-      TableName: tables.invoices,
-      Key: { villaID },
-      UpdateExpression: "SET #item = :status",
-      ExpressionAttributeNames: { "#item": tableItemId },
-      ExpressionAttributeValues: { ":status": status },
-      ReturnValues: "ALL_NEW",
-    })
+  const { rows } = await query(
+    `INSERT INTO villa_item_invoice (villa_id, table_item_id, status)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (villa_id, table_item_id) DO UPDATE SET status = EXCLUDED.status
+     RETURNING status`,
+    [villaID, tableItemId, status]
   );
-  return result.Attributes?.[tableItemId] ?? status;
+  return rows[0]?.status ?? status;
 }
 
 /**
@@ -45,11 +63,10 @@ export async function updateInvoiceStatus(villaID, tableItemId, status) {
  * work is done instead of requiring a separate manual step.
  *
  * Deliberately does NOT auto-revert the invoice when un-completing an
- * activity — the original app only *warns* the user client-side if the
- * invoice was already "Paid" (see ActivityStatusControl on the frontend)
- * and leaves the actual invoice status change, if any, to a manual
- * decision. Reverting a paid invoice automatically would be a real
- * financial side-effect to make silently.
+ * activity — unchanged from the original: the frontend only *warns* if
+ * the invoice was already "Paid" and leaves any actual change to a
+ * manual decision. Reverting a paid invoice automatically would be a
+ * real financial side-effect to make silently.
  */
 export async function autoUpdateInvoiceOnCompletion(villaID, tableItemId, previousStatus, newStatus) {
   if (newStatus === "Completed" && previousStatus !== "Completed") {

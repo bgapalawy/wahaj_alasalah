@@ -12,7 +12,7 @@ const STATUS_OPTIONS = ACTIVITY_STATUS_OPTIONS; // NotStarted/NCR/Notes/Rejected
  * into Completed. If you're un-completing something whose invoice was
  * already "Paid," this warns before saving, same as the original.
  */
-export function ActivityStatusControl({ villaID, tableItemId, onSaved, onStatusLoaded }) {
+export function ActivityStatusControl({ villaID, tableItemId, onSaved }) {
   const [current, setCurrent] = useState(null);
   const [draftStatus, setDraftStatus] = useState("NotStarted");
   const [draftDate, setDraftDate] = useState("");
@@ -30,12 +30,6 @@ export function ActivityStatusControl({ villaID, tableItemId, onSaved, onStatusL
         setDraftStatus(data.status ?? "NotStarted");
         setDraftDate(data.completedDate ?? "");
         setState("ready");
-        // Lighter than onSaved on purpose — nothing actually changed
-        // server-side just because the panel opened, so this only needs
-        // to inform the parent of the real current status (e.g. for
-        // FileStatusSection's default tab), not trigger a map/other-
-        // panel refetch cascade the way a real save should.
-        onStatusLoaded?.(tableItemId, data);
       })
       .catch((err) => {
         if (cancelled) return;
@@ -48,6 +42,16 @@ export function ActivityStatusControl({ villaID, tableItemId, onSaved, onStatusL
   }, [villaID, tableItemId]);
 
   async function handleSave() {
+    // User must explicitly provide a date when marking something
+    // Completed — no more silent default-to-today, since that's exactly
+    // how the actual_date/status mismatch happened in the first place
+    // (a date getting set without anyone deliberately choosing it).
+    if (draftStatus === "Completed" && !draftDate) {
+      setErrorMessage("Enter a completion date before marking this item Completed.");
+      setState("error");
+      return;
+    }
+
     // Matches the original app: warn before un-completing an activity
     // whose invoice was already marked "Paid" — reverting it silently
     // would be a real financial side-effect, not something to do without
@@ -75,18 +79,10 @@ export function ActivityStatusControl({ villaID, tableItemId, onSaved, onStatusL
         status: draftStatus,
         // Non-Completed always clears the date server-side too (belt and
         // suspenders — see activityStatusService.js), keeping status and
-        // actual_date from ever drifting apart again. Left blank while
-        // Completed -> defaults to today (also enforced server-side as
-        // the authoritative fallback, in case anything else calls the
-        // API directly without a date).
-        completedDate: draftStatus === "Completed" ? draftDate || null : null,
+        // actual_date from ever drifting apart again.
+        completedDate: draftStatus === "Completed" ? draftDate : null,
       });
       setCurrent(updated);
-      // Re-sync the date input to what the server actually saved, not
-      // just what was typed — the two should already match, but this
-      // makes the input authoritative on the response instead of
-      // silently trusting local state after a round trip.
-      setDraftDate(updated.completedDate ?? "");
       setState("ready");
       onSaved?.(tableItemId, updated);
     } catch (err) {
@@ -122,7 +118,7 @@ export function ActivityStatusControl({ villaID, tableItemId, onSaved, onStatusL
             value={draftDate}
             onChange={(e) => setDraftDate(e.target.value)}
             max={new Date().toISOString().slice(0, 10)}
-            placeholder="Defaults to today if left blank"
+            required
           />
         )}
 

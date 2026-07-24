@@ -6,7 +6,9 @@
   "main": "src/server.js",
   "scripts": {
     "dev": "node --watch src/server.js",
-    "start": "node src/server.js"
+    "start": "node src/server.js",
+    "migrate:dry-run": "node scripts/migrate-to-postgres.js --dry-run",
+    "migrate:write": "node scripts/migrate-to-postgres.js --write"
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.600.0",
@@ -15,6 +17,7 @@
     "@aws-sdk/s3-request-presigner": "^3.600.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
-    "express": "^4.19.2"
+    "express": "^4.19.2",
+    "pg": "^8.12.0"
   }
 }

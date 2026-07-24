@@ -7,11 +7,20 @@ import { MAX_UPLOAD_SIZE_MB } from "../../config/uploadLimitsClient.js";
  * from left_click.js, but the S3 SDK calls are gone. The browser now only
  * ever talks to our backend for a presigned URL, then PUTs straight to S3.
  */
-export function FileUploadSlot({ prefix }) {
+export function FileUploadSlot({ prefix, friendlyNameBase }) {
   const [file, setFile] = useState(null); // { key, extension, previewUrl }
   const [status, setStatus] = useState("loading"); // loading | empty | ready | uploading | error
   const [errorMessage, setErrorMessage] = useState(null);
   const inputRef = useRef(null);
+
+  // Friendly display/download name (e.g. "Steel Fixing - Villa V_8 -
+  // Completed1.pdf") — falls back to the raw S3 key if no friendly base
+  // was passed in, so this component still works standalone.
+  const friendlyFileName = file
+    ? friendlyNameBase
+      ? `${friendlyNameBase}.${file.extension}`
+      : file.key.split("/").pop()
+    : null;
 
   useEffect(() => {
     let cancelled = false;
@@ -25,7 +34,8 @@ export function FileUploadSlot({ prefix }) {
           setStatus("empty");
           return;
         }
-        const { url } = await uploadsApi.presignGet(match.key);
+        const friendlyName = friendlyNameBase ? `${friendlyNameBase}.${match.extension}` : match.key.split("/").pop();
+        const { url } = await uploadsApi.presignGet(match.key, friendlyName);
         if (cancelled) return;
         setFile({ key: match.key, extension: match.extension, previewUrl: url });
         setStatus("ready");
@@ -75,8 +85,45 @@ export function FileUploadSlot({ prefix }) {
 
   async function handleDownload() {
     if (!file) return;
-    const { url } = await uploadsApi.presignGet(file.key, file.key);
-    window.open(url, "_blank", "noopener");
+    try {
+      const { url } = await uploadsApi.presignGet(file.key, friendlyFileName);
+      // Can't just window.open() or use <a download> directly on the S3
+      // URL — browsers ignore the download attribute on cross-origin
+      // links (which a presigned S3 URL always is), so that would just
+      // navigate to/open the file instead of downloading it. Fetching it
+      // as a blob first gives a same-origin blob: URL that a real
+      // download actually works on, with no new tab involved.
+      const response = await fetch(url);
+      if (!response.ok) throw new Error("Could not download file");
+      const blob = await response.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = blobUrl;
+      link.download = friendlyFileName || `file.${file.extension}`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(blobUrl);
+    } catch (err) {
+      setErrorMessage(err.message);
+      setStatus("error");
+    }
+  }
+
+  async function handlePreview() {
+    if (!file) return;
+    try {
+      // No friendly filename passed here on purpose — that would set
+      // Content-Disposition: attachment and force a download instead of
+      // letting the browser render it inline (PDFs, images, etc.).
+      // Preview is the one case where a new tab is actually correct,
+      // since viewing (not saving) is the whole point.
+      const { url } = await uploadsApi.presignGet(file.key);
+      window.open(url, "_blank", "noopener");
+    } catch (err) {
+      setErrorMessage(err.message);
+      setStatus("error");
+    }
   }
 
   async function handleDelete() {
@@ -109,7 +156,7 @@ export function FileUploadSlot({ prefix }) {
           <video className="image" src={file.previewUrl} controls />
         )}
         {status === "ready" && file && !isImage && !isVideo && (
-          <div className="file-generic">📄 {file.key.split("/").pop()}</div>
+          <div className="file-generic">📄 {friendlyFileName}</div>
         )}
         {status === "error" && <span className="upload-error">{errorMessage}</span>}
       </div>
@@ -117,6 +164,9 @@ export function FileUploadSlot({ prefix }) {
         Select File
       </button>
       <div className="button-group">
+        <button type="button" onClick={handlePreview} disabled={!file}>
+          Preview
+        </button>
         <button type="button" onClick={handleDownload} disabled={!file}>
           Download
         </button>

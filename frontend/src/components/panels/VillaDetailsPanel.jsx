@@ -23,7 +23,7 @@ const VillaDashboard = lazy(() =>
  * construction-item picker, the file-status upload section, and (new) an
  * expandable dependency graph replacing the old right-click popup.
  */
-export function VillaDetailsPanel({ villaID, onClose, initialConstructionItem = null }) {
+export function VillaDetailsPanel({ villaID, onClose, initialConstructionItem = null, onDataChanged }) {
   const [villa, setVilla] = useState(null);
   const [status, setStatus] = useState("idle");
   const [selectedItem, setSelectedItem] = useState(initialConstructionItem);
@@ -31,6 +31,7 @@ export function VillaDetailsPanel({ villaID, onClose, initialConstructionItem = 
   const [showDashboard, setShowDashboard] = useState(false);
   const [allActivities, setAllActivities] = useState([]);
   const [liveStatusMap, setLiveStatusMap] = useState({});
+  const [panelRefreshKey, setPanelRefreshKey] = useState(0);
   const { villaMetaByID } = useVillaGeoMeta();
 
   useEffect(() => {
@@ -111,20 +112,32 @@ export function VillaDetailsPanel({ villaID, onClose, initialConstructionItem = 
           <ConstructionItemSelect value={selectedItem} onChange={setSelectedItem} />
 
           {selectedItem && (
-            <PlannedDatesDisplay villaID={villaID} tableItemId={selectedItem.TableItemID} />
+            <PlannedDatesDisplay villaID={villaID} tableItemId={selectedItem.TableItemID} refreshKey={panelRefreshKey} />
           )}
 
           {selectedItem && (
             <ActivityStatusControl
               villaID={villaID}
               tableItemId={selectedItem.TableItemID}
-              onSaved={(tableItemId, updated) =>
-                setLiveStatusMap((prev) => ({ ...prev, [tableItemId]: updated }))
+              onStatusLoaded={(tableItemId, data) =>
+                setLiveStatusMap((prev) => ({ ...prev, [tableItemId]: data }))
               }
+              onSaved={(tableItemId, updated) => {
+                setLiveStatusMap((prev) => ({ ...prev, [tableItemId]: updated }));
+                setPanelRefreshKey((k) => k + 1);
+                onDataChanged?.();
+              }}
             />
           )}
 
-          {selectedItem && <InvoiceStatusControl villaID={villaID} tableItemId={selectedItem.TableItemID} />}
+          {selectedItem && (
+            <InvoiceStatusControl
+              villaID={villaID}
+              tableItemId={selectedItem.TableItemID}
+              onSaved={() => onDataChanged?.()}
+              refreshKey={panelRefreshKey}
+            />
+          )}
 
           {selectedItem && (
             <button
@@ -154,7 +167,11 @@ export function VillaDetailsPanel({ villaID, onClose, initialConstructionItem = 
 
           <FileStatusSection
             constructionItemId={selectedItem?.TableItemID ?? null}
+            constructionItemName={selectedItem?.name ?? null}
             villaID={villaID}
+            activityStatus={
+              selectedItem ? liveStatusMap[selectedItem.TableItemID]?.status ?? selectedItem.status : null
+            }
           />
         </>
       )}

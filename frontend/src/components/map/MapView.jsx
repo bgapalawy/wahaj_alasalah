@@ -39,7 +39,7 @@ function FitToBounds({ geojson }) {
   return null;
 }
 
-export const MapView = forwardRef(function MapView({ onVillaClick, colorByItem, onColorByItemChange }, ref) {
+export const MapView = forwardRef(function MapView({ onVillaClick, colorByItem, onColorByItemChange, refreshKey = 0 }, ref) {
   const { getColors, getColumnColors, setColumnColor, resetColumnColors } = useColorPreferences();
   const [geojson, setGeojson] = useState(null);
   const [boundaryGeojson, setBoundaryGeojson] = useState(null);
@@ -92,16 +92,18 @@ export const MapView = forwardRef(function MapView({ onVillaClick, colorByItem, 
 
   // One fetch per selected item, covering Status and Invoice modes.
   const { rows: itemRows, statusLookup, invoiceLookup, status: itemDataLoadStatus } = useConstructionItemData(
-    colorByItem?.TableItemID ?? null
+    colorByItem?.TableItemID ?? null,
+    refreshKey
   );
 
   // Schedule mode needs every villa's FULL status map too (to check
   // predecessor completion via the dependency graph) — fetched once,
   // independent of which item is selected, only when actually needed.
   const { data: allVillaStatuses, status: allVillaStatusesLoadStatus } = useAllVillaStatuses(
-    colorMode === "schedule" || customQueryConditions.length > 0
+    colorMode === "schedule" || customQueryConditions.length > 0,
+    refreshKey
   );
-  const { data: allVillaInvoiceStatuses } = useAllVillaInvoiceStatuses(customQueryConditions.length > 0);
+  const { data: allVillaInvoiceStatuses } = useAllVillaInvoiceStatuses(customQueryConditions.length > 0, refreshKey);
   const {
     columns: specialQueryColumns,
     valuesByColumn: specialQueryValuesByColumn,

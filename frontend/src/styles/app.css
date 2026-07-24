@@ -1156,13 +1156,15 @@ button, input, select {
 
 .upload-slot .button-group {
   display: flex;
-  gap: var(--space-1);
+  flex-direction: column;
+  gap: 0.25rem;
 }
 
 .upload-slot button {
-  flex: 1;
+  width: 100%;
   font-size: 0.68rem;
   padding: 0.3rem;
+  white-space: nowrap;
 }
 
 .upload-slot button:disabled {

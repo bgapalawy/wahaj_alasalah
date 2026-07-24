@@ -11,7 +11,7 @@ import { dashboardApi } from "../api/dashboard.js";
  *     MapView via utils/scheduleUtils.js, since it also needs every
  *     villa's FULL status map (a second fetch) to check predecessors.
  */
-export function useConstructionItemData(tableItemId) {
+export function useConstructionItemData(tableItemId, refreshKey = 0) {
   const [rows, setRows] = useState(null);
   const [status, setStatus] = useState("idle"); // idle | loading | success | error
 
@@ -38,7 +38,7 @@ export function useConstructionItemData(tableItemId) {
     return () => {
       cancelled = true;
     };
-  }, [tableItemId]);
+  }, [tableItemId, refreshKey]);
 
   const statusLookup = rows ? Object.fromEntries(rows.map((r) => [r.villaID, r.actualStatus])) : null;
   const invoiceLookup = rows ? Object.fromEntries(rows.map((r) => [r.villaID, r.invoiceStatus])) : null;

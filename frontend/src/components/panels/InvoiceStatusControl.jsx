@@ -10,7 +10,7 @@ import { INVOICE_STATUS_ORDER } from "../../config/scheduleInvoiceColors.js";
  * invoiceService.autoUpdateInvoiceOnCompletion) — this control is for
  * moving it further (e.g. marking it Paid) or manually overriding it.
  */
-export function InvoiceStatusControl({ villaID, tableItemId, onSaved }) {
+export function InvoiceStatusControl({ villaID, tableItemId, onSaved, refreshKey = 0 }) {
   const [current, setCurrent] = useState(null);
   const [draftStatus, setDraftStatus] = useState("NotStarted");
   const [state, setState] = useState("loading"); // loading | ready | saving | error
@@ -35,7 +35,11 @@ export function InvoiceStatusControl({ villaID, tableItemId, onSaved }) {
     return () => {
       cancelled = true;
     };
-  }, [villaID, tableItemId]);
+    // refreshKey: so this refetches after ActivityStatusControl's save
+    // auto-flips it to ReadyToPay server-side — otherwise this panel
+    // keeps showing whatever it loaded on mount until reopened.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [villaID, tableItemId, refreshKey]);
 
   async function handleSave() {
     // Matches the original app's warning when un-completing an activity
