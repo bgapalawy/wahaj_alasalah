@@ -75,20 +75,11 @@ export function VillaLayer({
   const layerRef = useRef(null);
   const map = useMap();
 
-  // NOT_VILLA parcels (roads, common areas, non-villa land) are ~71% of
-  // this file's total features (5,439 total vs 1,540 real villas) but
-  // were being rendered unconditionally — a big chunk of the map's real
-  // rendering cost on every zoom/pan for shapes that convey no per-villa
-  // information. Now only included when someone actually wants that
-  // context (the boundary toggle, or a PDF export needing the full site).
-  const displayGeojson = useMemo(() => {
-    if (!geojson) return geojson;
-    if (showBoundary || forceAllLabels) return geojson;
-    return {
-      ...geojson,
-      features: geojson.features.filter((f) => f.properties?.villaID && f.properties.villaID !== "NOT_VILLA"),
-    };
-  }, [geojson, showBoundary, forceAllLabels]);
+  // Reverted back to always rendering the full geojson (including
+  // NOT_VILLA parcels) — the labels-off-by-default + auto-hide-on-zoom
+  // changes already fixed zoom performance well enough on their own,
+  // and NOT_VILLA shapes are wanted visible by default again.
+  const displayGeojson = geojson;
 
   const styleFn = useMemo(
     () => (feature) => {
