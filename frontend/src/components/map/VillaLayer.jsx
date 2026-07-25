@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { GeoJSON, useMap } from "react-leaflet";
 import { ITEM_STATUS_COLORS } from "../../config/itemStatusColors.js";
 
@@ -217,32 +217,35 @@ export function VillaLayer({
     };
   }, [map, showLabels, forceAllLabels, geojson]);
 
-  const onEachFeature = (feature, layer) => {
-    const villaID = feature.properties?.villaID;
-    if (!villaID || villaID === "NOT_VILLA") return; // not a real villa — no click, no label
+  const onEachFeature = useCallback(
+    (feature, layer) => {
+      const villaID = feature.properties?.villaID;
+      if (!villaID || villaID === "NOT_VILLA") return; // not a real villa — no click, no label
 
-    // Normally villanum ("40") mirrors villaID ("V_40") exactly, but a
-    // handful of real, clickable villas turned up with a missing or
-    // stale villanum despite a perfectly valid villaID — invisible on
-    // the map at any zoom even though the popup (driven by villaID)
-    // opened fine. Rather than depend on villanum being trustworthy,
-    // fall back to stripping any leading non-digits off villaID itself
-    // so the same identifier that already proved reliable for clicks
-    // also guarantees a label.
-    const rawVillanum = feature.properties?.villanum;
-    const derivedFromID = String(villaID).replace(/^\D+/, "");
-    const labelText = rawVillanum && rawVillanum !== "NOT_VILLA" ? String(rawVillanum) : derivedFromID;
+      // Normally villanum ("40") mirrors villaID ("V_40") exactly, but a
+      // handful of real, clickable villas turned up with a missing or
+      // stale villanum despite a perfectly valid villaID — invisible on
+      // the map at any zoom even though the popup (driven by villaID)
+      // opened fine. Rather than depend on villanum being trustworthy,
+      // fall back to stripping any leading non-digits off villaID itself
+      // so the same identifier that already proved reliable for clicks
+      // also guarantees a label.
+      const rawVillanum = feature.properties?.villanum;
+      const derivedFromID = String(villaID).replace(/^\D+/, "");
+      const labelText = rawVillanum && rawVillanum !== "NOT_VILLA" ? String(rawVillanum) : derivedFromID;
 
-    if (labelText) {
-      layer.bindTooltip(labelText, {
-        permanent: true,
-        direction: "center",
-        className: "villa-label-tooltip",
-      });
-    }
+      if (labelText) {
+        layer.bindTooltip(labelText, {
+          permanent: true,
+          direction: "center",
+          className: "villa-label-tooltip",
+        });
+      }
 
-    layer.on("click", () => onVillaClick?.(villaID, feature));
-  };
+      layer.on("click", () => onVillaClick?.(villaID, feature));
+    },
+    [onVillaClick]
+  );
 
   if (!geojson) return null;
 
