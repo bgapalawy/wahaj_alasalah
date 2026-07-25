@@ -21,6 +21,14 @@ if (!process.env.JWT_SECRET) {
 
 const app = express();
 
+// Required behind any reverse proxy (Render, and most hosts) — without
+// this, express-rate-limit can't safely trust the X-Forwarded-For
+// header it needs to identify unique clients, and throws internally in
+// a way that leaves the request hanging with no response at all,
+// rather than a clean error. `1` = trust exactly one hop (the
+// platform's own proxy), not an arbitrary chain — safer than `true`.
+app.set("trust proxy", 1);
+
 app.use(cors({ origin: process.env.FRONTEND_ORIGIN }));
 // Default 100kb is nowhere near enough for a bulk Excel import — a full
 // table (up to ~villaCount rows) sent as JSON can run several MB.
