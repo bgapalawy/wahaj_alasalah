@@ -188,13 +188,23 @@ export const MapView = forwardRef(function MapView({ onVillaClick, colorByItem, 
       savedViewRef.current = { center: map.getCenter(), zoom: map.getZoom() };
       setForceAllLabels(true);
 
+      // Boundary data is now fetched lazily (see the effect above) — make
+      // sure it's actually loaded before computing bounds from it, rather
+      // than trusting React state, which won't have caught up yet on a
+      // session's first export. Resolves instantly if already cached.
+      let boundary = boundaryGeojson;
+      if (!boundary) {
+        boundary = await cachedJsonFetch(BOUNDARY_GEOJSON_URL).catch(() => null);
+        if (boundary) setBoundaryGeojson(boundary);
+      }
+
       const combined = L.latLngBounds([]);
       if (geojson) {
         const b = L.geoJSON(geojson).getBounds();
         if (b.isValid()) combined.extend(b);
       }
-      if (boundaryGeojson) {
-        const b = L.geoJSON(boundaryGeojson).getBounds();
+      if (boundary) {
+        const b = L.geoJSON(boundary).getBounds();
         if (b.isValid()) combined.extend(b);
       }
 
@@ -603,15 +613,22 @@ export const MapView = forwardRef(function MapView({ onVillaClick, colorByItem, 
     cachedJsonFetch(GEOJSON_URL).then(setGeojson).catch(setLoadError);
   }, []);
 
-  // Fetched eagerly (not just when toggled on) so "Download PDF" always
-  // has the boundary's extent available to combine with the villa
-  // parcels' bounds — a 404 here is fine, the boundary feature is
-  // optional and this just leaves boundaryGeojson null.
+  // Lazy on purpose — this was previously fetched unconditionally on
+  // every page load "just in case" Download PDF needed it, but it's a
+  // large file only actually used when the boundary layer is toggled on
+  // or a PDF export starts (forceAllLabels), and most sessions never do
+  // either. Fetching it eagerly put it on the critical path for
+  // everyone to speed up a feature most people never touch — in one
+  // observed load it alone took 18s. A 404 here is still fine, the
+  // boundary feature is optional and this just leaves boundaryGeojson
+  // null.
   useEffect(() => {
+    if (!showBoundary && !forceAllLabels) return;
+    if (boundaryGeojson) return;
     cachedJsonFetch(BOUNDARY_GEOJSON_URL)
       .then(setBoundaryGeojson)
       .catch(() => setBoundaryGeojson(null));
-  }, []);
+  }, [showBoundary, forceAllLabels, boundaryGeojson]);
 
   if (loadError) {
     return (
