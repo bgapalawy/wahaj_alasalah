@@ -44,7 +44,14 @@ export async function getManyInvoiceStatuses(villaIDs) {
   return result;
 }
 
+const VALID_INVOICE_STATUSES = new Set(["NotStarted", "ReadyToPay", "Paid"]);
+
 export async function updateInvoiceStatus(villaID, tableItemId, status) {
+  if (!VALID_INVOICE_STATUSES.has(status)) {
+    const err = new Error(`"${status}" is not a valid invoice status.`);
+    err.status = 400;
+    throw err;
+  }
   const { rows } = await query(
     `INSERT INTO villa_item_invoice (villa_id, table_item_id, status)
      VALUES ($1, $2, $3)

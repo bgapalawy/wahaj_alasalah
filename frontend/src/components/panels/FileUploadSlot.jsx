@@ -1,13 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { uploadsApi } from "../../api/uploads.js";
-import { MAX_UPLOAD_SIZE_MB } from "../../config/uploadLimitsClient.js";
 
 /**
  * One upload "slot" — mirrors a single createImageUploadSection() instance
  * from left_click.js, but the S3 SDK calls are gone. The browser now only
  * ever talks to our backend for a presigned URL, then PUTs straight to S3.
  */
-export function FileUploadSlot({ prefix, friendlyNameBase }) {
+export function FileUploadSlot({ prefix, friendlyNameBase, uploadLimits }) {
   const [file, setFile] = useState(null); // { key, extension, previewUrl }
   const [status, setStatus] = useState("loading"); // loading | empty | ready | uploading | error
   const [errorMessage, setErrorMessage] = useState(null);
@@ -54,10 +53,18 @@ export function FileUploadSlot({ prefix, friendlyNameBase }) {
     const selected = event.target.files?.[0];
     if (!selected) return;
 
-    if (selected.size > MAX_UPLOAD_SIZE_MB * 1024 * 1024) {
-      setErrorMessage(`File exceeds ${MAX_UPLOAD_SIZE_MB}MB limit`);
-      event.target.value = "";
-      return;
+    if (uploadLimits) {
+      const extension = selected.name.split(".").pop()?.toLowerCase();
+      if (!uploadLimits.extensions.includes(extension)) {
+        setErrorMessage(`Unsupported file type ".${extension}". Allowed: ${uploadLimits.extensions.map((e) => `.${e}`).join(", ")}`);
+        event.target.value = "";
+        return;
+      }
+      if (selected.size > uploadLimits.maxSizeMB * 1024 * 1024) {
+        setErrorMessage(`File exceeds ${uploadLimits.maxSizeMB}MB limit`);
+        event.target.value = "";
+        return;
+      }
     }
 
     setStatus("uploading");
@@ -141,6 +148,7 @@ export function FileUploadSlot({ prefix, friendlyNameBase }) {
       <input
         ref={inputRef}
         type="file"
+        accept={uploadLimits ? uploadLimits.extensions.map((e) => `.${e}`).join(",") : undefined}
         hidden
         onChange={handleFileChange}
         disabled={status === "uploading"}

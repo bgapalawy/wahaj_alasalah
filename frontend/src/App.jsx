@@ -3,6 +3,7 @@ import { downloadVectorLayoutPdf } from "./utils/buildVectorLayoutPdf.js";
 import { MapView } from "./components/map/MapView.jsx";
 import { VillaDetailsPanel } from "./components/panels/VillaDetailsPanel.jsx";
 import { useDraggable } from "./hooks/useDraggable.js";
+import { useLoggedInUser, logout } from "./components/auth/AuthGate.jsx";
 import "./styles/app.css";
 
 // Chart.js + xlsx are heavy — only load when the project dashboard opens.
@@ -20,6 +21,7 @@ const OutOfSequenceReport = lazy(() =>
 );
 
 export default function App() {
+  const loggedInUser = useLoggedInUser();
   const [selectedVillaID, setSelectedVillaID] = useState(null);
   const [showProjectDashboard, setShowProjectDashboard] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
@@ -124,6 +126,12 @@ export default function App() {
           <button type="button" className="header-dashboard-btn" onClick={() => setShowColorSettings(true)}>
             Colors
           </button>
+          <span className="app-header-user">
+            {loggedInUser && <span>{loggedInUser}</span>}
+            <button type="button" className="app-header-logout-btn" onClick={logout}>
+              Log out
+            </button>
+          </span>
         </div>
       </header>
       <main className="app-main">

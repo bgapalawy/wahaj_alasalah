@@ -59,7 +59,14 @@ export async function getAllActivityStatuses(villaID) {
  * same as the old DynamoDB version only ever wrote to its own two
  * tables and never touched plannedCosts/plannedDates.
  */
+const VALID_ACTIVITY_STATUSES = new Set(["NotStarted", "InProgress", "Completed", "NCR", "Rejected", "Notes"]);
+
 export async function updateActivityStatus(villaID, tableItemId, { status, completedDate }) {
+  if (!VALID_ACTIVITY_STATUSES.has(status)) {
+    const err = new Error(`"${status}" is not a valid activity status.`);
+    err.status = 400;
+    throw err;
+  }
   // No longer a hard requirement — if left blank while marking Completed,
   // this defaults to today (via the database's own CURRENT_DATE, not the
   // Node process's clock, for the same timezone-safety reason actual_date

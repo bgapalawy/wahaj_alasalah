@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { FILE_STATUS_CATEGORIES, buildSlotPrefix, buildFriendlyFileName } from "../../config/fileStatusConfig.js";
 import { FileUploadSlot } from "./FileUploadSlot.jsx";
+import { uploadsApi } from "../../api/uploads.js";
 
 const VALID_TAB_STATES = new Set(FILE_STATUS_CATEGORIES.map((c) => c.state));
 
@@ -11,6 +12,15 @@ const VALID_TAB_STATES = new Set(FILE_STATUS_CATEGORIES.map((c) => c.state));
  */
 export function FileStatusSection({ constructionItemId, constructionItemName, villaID, activityStatus }) {
   const [activeState, setActiveState] = useState(FILE_STATUS_CATEGORIES[0].state);
+  const [uploadLimits, setUploadLimits] = useState(null);
+
+  // Fetched once per panel open (not per-slot — there can be 11 slots
+  // rendered at once) so the real allowed extensions/size can be shown
+  // upfront instead of the user finding out by trial and error after a
+  // rejected upload.
+  useEffect(() => {
+    uploadsApi.limits().then(setUploadLimits).catch(() => setUploadLimits(null));
+  }, []);
 
   // Default (and re-sync) the open tab to match the activity's current
   // status, so new uploads land under the right category by default
@@ -30,6 +40,11 @@ export function FileStatusSection({ constructionItemId, constructionItemName, vi
   return (
     <div className="file-status-section">
       <h3>Files status</h3>
+      {uploadLimits && (
+        <p className="file-status-hint">
+          Allowed: {uploadLimits.extensions.map((e) => `.${e}`).join(", ")} — max {uploadLimits.maxSizeMB}MB per file
+        </p>
+      )}
       <div className="status-tabs">
         {FILE_STATUS_CATEGORIES.map(({ state, label }) => (
           <button
@@ -50,6 +65,7 @@ export function FileStatusSection({ constructionItemId, constructionItemName, vi
               key={slotIndex}
               prefix={buildSlotPrefix({ constructionItemId, villaID, state, slotIndex })}
               friendlyNameBase={buildFriendlyFileName({ constructionItemName, villaID, state, slotIndex })}
+              uploadLimits={uploadLimits}
             />
           ))}
         </div>
