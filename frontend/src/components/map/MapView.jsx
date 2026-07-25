@@ -6,6 +6,7 @@ import { BoundaryLayer } from "./BoundaryLayer.jsx";
 import { MapPanControl } from "./MapPanControl.jsx";
 import { MapItemColorControl } from "./MapItemColorControl.jsx";
 import { MAP_DEFAULTS, GEOJSON_URL, BOUNDARY_GEOJSON_URL } from "../../config/mapConfig.js";
+import { cachedJsonFetch } from "../../utils/cachedFetch.js";
 import { useConstructionItemData } from "../../hooks/useConstructionItemData.js";
 import { useAllVillaStatuses } from "../../hooks/useAllVillaStatuses.js";
 import { useAllVillaInvoiceStatuses } from "../../hooks/useAllVillaInvoiceStatuses.js";
@@ -599,13 +600,7 @@ export const MapView = forwardRef(function MapView({ onVillaClick, colorByItem, 
   }, [villaMetaByID, filteredVillaIDs]);
 
   useEffect(() => {
-    fetch(GEOJSON_URL)
-      .then((res) => {
-        if (!res.ok) throw new Error(`Failed to load ${GEOJSON_URL} (${res.status})`);
-        return res.json();
-      })
-      .then(setGeojson)
-      .catch(setLoadError);
+    cachedJsonFetch(GEOJSON_URL).then(setGeojson).catch(setLoadError);
   }, []);
 
   // Fetched eagerly (not just when toggled on) so "Download PDF" always
@@ -613,8 +608,7 @@ export const MapView = forwardRef(function MapView({ onVillaClick, colorByItem, 
   // parcels' bounds — a 404 here is fine, the boundary feature is
   // optional and this just leaves boundaryGeojson null.
   useEffect(() => {
-    fetch(BOUNDARY_GEOJSON_URL)
-      .then((res) => (res.ok ? res.json() : null))
+    cachedJsonFetch(BOUNDARY_GEOJSON_URL)
       .then(setBoundaryGeojson)
       .catch(() => setBoundaryGeojson(null));
   }, []);
