@@ -53,7 +53,10 @@ function HideLabelsOnZoom({ onZoomStart }) {
   return null;
 }
 
-export const MapView = forwardRef(function MapView({ onVillaClick, colorByItem, onColorByItemChange, refreshKey = 0 }, ref) {
+export const MapView = forwardRef(function MapView(
+  { onVillaClick, colorByItem, onColorByItemChange, refreshKey = 0, labelsEnabled = false, onLabelsEnabledChange },
+  ref
+) {
   const { getColors, getColumnColors, setColumnColor, resetColumnColors } = useColorPreferences();
   const [geojson, setGeojson] = useState(null);
   const [boundaryGeojson, setBoundaryGeojson] = useState(null);
@@ -66,7 +69,6 @@ export const MapView = forwardRef(function MapView({ onVillaClick, colorByItem, 
   const [highlightBlocks, setHighlightBlocks] = useState([]);
   const [highlightZones, setHighlightZones] = useState([]);
   const [showBoundary, setShowBoundary] = useState(false);
-  const [labelsEnabled, setLabelsEnabled] = useState(false);
   const [colorMode, setColorMode] = useState("status"); // status | schedule | invoice | column
   const [selectedSpecialQueryColumn, setSelectedSpecialQueryColumn] = useState("");
   const [selectedColumnValues, setSelectedColumnValues] = useState([]);
@@ -662,6 +664,7 @@ export const MapView = forwardRef(function MapView({ onVillaClick, colorByItem, 
         maxZoom={MAP_DEFAULTS.maxZoom}
         style={{ height: "100%", width: "100%" }}
         preferCanvas
+        attributionControl={false}
         zoomAnimation={false}
       >
         <VillaLayer
@@ -692,13 +695,13 @@ export const MapView = forwardRef(function MapView({ onVillaClick, colorByItem, 
         )}
         <FitToBounds geojson={geojson} />
         <MapPanControl />
-        <HideLabelsOnZoom onZoomStart={() => setLabelsEnabled(false)} />
+        <HideLabelsOnZoom onZoomStart={() => onLabelsEnabledChange?.(false)} />
       </MapContainer>
 
       <button
         type="button"
         className={`map-labels-toggle ${labelsEnabled ? "is-active" : ""}`}
-        onClick={() => setLabelsEnabled((v) => !v)}
+        onClick={() => onLabelsEnabledChange?.(!labelsEnabled)}
       >
         {labelsEnabled ? "🏷️ Hide Villa Numbers" : "🏷️ Show Villa Numbers"}
       </button>

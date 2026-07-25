@@ -762,23 +762,9 @@ button, input, select {
   color: var(--color-danger);
 }
 
-.map-item-color-control {
-  position: absolute;
-  top: var(--space-4);
-  left: 4.5rem;
-  z-index: 1000;
-  width: 320px;
-  max-height: calc(100vh - 6rem);
-  overflow-y: auto;
-  background: var(--color-surface);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-md);
-  padding: var(--space-3);
-}
-
 .map-labels-toggle {
   position: absolute;
-  top: var(--space-4);
+  bottom: var(--space-4);
   right: var(--space-4);
   z-index: 1000;
   border: none;
@@ -799,6 +785,20 @@ button, input, select {
 
 .map-labels-toggle:hover {
   filter: brightness(0.97);
+}
+
+.map-item-color-control {
+  position: absolute;
+  top: var(--space-4);
+  left: 4.5rem;
+  z-index: 1000;
+  width: 320px;
+  max-height: calc(100vh - 6rem);
+  overflow-y: auto;
+  background: var(--color-surface);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  padding: var(--space-3);
 }
 
 .map-item-color-header {
