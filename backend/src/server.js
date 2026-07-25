@@ -27,5 +27,5 @@ app.use(errorHandler);
 
 const port = process.env.PORT || 4000;
 app.listen(port, () => {
-  console.log(`Wajha API listening on http://localhost:${port}`);
+  console.log(`Shams_Elgroub API listening on http://localhost:${port}`);
 });

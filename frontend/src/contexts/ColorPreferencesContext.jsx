@@ -1,15 +1,16 @@
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { ITEM_STATUS_COLORS } from "../config/itemStatusColors.js";
-import { SCHEDULE_STATUS_COLORS, INVOICE_STATUS_COLORS } from "../config/scheduleInvoiceColors.js";
+import { SCHEDULE_STATUS_COLORS, INVOICE_STATUS_COLORS, OUT_OF_SEQUENCE_COLORS } from "../config/scheduleInvoiceColors.js";
 import { VILLA_STATUS_COLORS } from "../config/mapConfig.js";
 import { hashToHexColor } from "../utils/colorHash.js";
 
-const STORAGE_KEY = "wajha-color-overrides-v1";
+const STORAGE_KEY = "shams_elgroub-color-overrides-v1";
 
 const DEFAULTS = {
   status: ITEM_STATUS_COLORS,
   schedule: SCHEDULE_STATUS_COLORS,
   invoice: INVOICE_STATUS_COLORS,
+  outOfSequence: OUT_OF_SEQUENCE_COLORS,
   overallStatus: VILLA_STATUS_COLORS,
   customQuery: { match: "#2563eb", noMatch: "#d1d5db" },
 };

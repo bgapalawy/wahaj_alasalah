@@ -8,7 +8,7 @@ import { query } from "../config/postgres.js";
  *
  * MIGRATED to Postgres (Neon) — was six separate DynamoDB
  * getManyVillaWideItems() calls (plannedCosts/actualCosts/plannedDates/
- * plannedDatesFinish/wajhaData/actualDates) plus a villa scan, merged in
+ * plannedDatesFinish/shams_elgroubData/actualDates) plus a villa scan, merged in
  * JS. Now a single query with LEFT JOINs, since villa_item_status
  * already merged those six wide tables into one row per (villa, item)
  * during the migration (see scripts/migrate-to-postgres.js).

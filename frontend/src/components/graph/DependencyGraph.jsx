@@ -7,6 +7,7 @@ import {
   PREDECESSOR_EDGE_COLOR,
   BLOCKING_NODE_ICON_COLOR,
   CURRENT_NODE_ICON_COLOR,
+  OUT_OF_SEQUENCE_BORDER_COLOR,
   getCategory,
   findRootCauseBlockingActivities,
 } from "../../utils/graphUtils.js";
@@ -64,6 +65,22 @@ export function DependencyGraph({ activities, currentActivityId = null }) {
     return set;
   }, [activities]);
 
+  // Same rule as outOfSequenceUtils.js (the project-wide report), scoped
+  // to just this villa's already-live-merged activities array.
+  const outOfSequenceIds = useMemo(() => {
+    const byId = new Map(activities.map((a) => [a.id, a]));
+    const flagged = new Set();
+    activities.forEach((activity) => {
+      if (activity.status !== "Completed") return;
+      const hasIncompletePredecessor = (activity.predecessors ?? []).some((predId) => {
+        const pred = byId.get(predId);
+        return pred && pred.status !== "Completed";
+      });
+      if (hasIncompletePredecessor) flagged.add(activity.id);
+    });
+    return flagged;
+  }, [activities]);
+
   useEffect(() => {
     if (!containerRef.current || activities.length === 0) return;
 
@@ -77,21 +94,24 @@ export function DependencyGraph({ activities, currentActivityId = null }) {
       const nodeCategoryBorderColor = CATEGORY_COLOR_PALETTE[category] ?? CATEGORY_COLOR_PALETTE.Default;
       const isBlocking = blockingIds.has(activity.id);
       const isCurrent = activity.id === currentActivityId;
+      const isOutOfSequence = outOfSequenceIds.has(activity.id);
 
       const nodeOptions = {
         id: activity.id,
-        label: activity.nameArabic,
+        label: isOutOfSequence ? `⚠ ${activity.nameArabic}` : activity.nameArabic,
         shape: "box",
         font: { size: 12, face: "Tahoma", color: "#333333" },
         margin: { top: 10, right: 10, bottom: 10, left: 10 },
         widthConstraint: { minimum: 120, maximum: 250 },
-        borderWidth: 2,
+        borderWidth: isOutOfSequence ? 4 : 2,
         borderWidthSelected: 4,
         color: {
           background: nodeStatusColor,
-          border: nodeCategoryBorderColor,
+          border: isOutOfSequence ? OUT_OF_SEQUENCE_BORDER_COLOR : nodeCategoryBorderColor,
         },
-        title: `Status: "${activity.status}"`,
+        title: isOutOfSequence
+          ? `Status: "${activity.status}" — OUT OF SEQUENCE (completed before its predecessor)`
+          : `Status: "${activity.status}"`,
       };
 
       if (isCurrent) {
@@ -103,7 +123,7 @@ export function DependencyGraph({ activities, currentActivityId = null }) {
           size: 40,
           color: CURRENT_NODE_ICON_COLOR,
         };
-        nodeOptions.label = `${activity.nameArabic}\nCurrent activity`;
+        nodeOptions.label = `${activity.nameArabic}\nCurrent activity${isOutOfSequence ? "\n⚠ OUT OF SEQUENCE" : ""}`;
       } else if (isBlocking) {
         nodeOptions.shape = "icon";
         nodeOptions.icon = {
@@ -113,7 +133,7 @@ export function DependencyGraph({ activities, currentActivityId = null }) {
           size: 40,
           color: BLOCKING_NODE_ICON_COLOR,
         };
-        nodeOptions.label = `${activity.nameArabic}\nRoot cause blocker`;
+        nodeOptions.label = `${activity.nameArabic}\nRoot cause blocker${isOutOfSequence ? "\n⚠ OUT OF SEQUENCE" : ""}`;
       }
 
       nodes.add(nodeOptions);
@@ -162,6 +182,7 @@ export function DependencyGraph({ activities, currentActivityId = null }) {
         categoriesUsed={categoriesUsed}
         showCurrent={currentActivityId !== null}
         showBlocking={blockingActivities.length > 0}
+        showOutOfSequence={outOfSequenceIds.size > 0}
       />
       {currentActivityId && (
         <ReadinessNote
@@ -174,7 +195,7 @@ export function DependencyGraph({ activities, currentActivityId = null }) {
   );
 }
 
-function GraphLegend({ categoriesUsed, showCurrent, showBlocking }) {
+function GraphLegend({ categoriesUsed, showCurrent, showBlocking, showOutOfSequence }) {
   return (
     <div className="graph-legend">
       <strong>Legend</strong>
@@ -201,7 +222,7 @@ function GraphLegend({ categoriesUsed, showCurrent, showBlocking }) {
           </div>
         ))}
       </div>
-      {(showCurrent || showBlocking) && (
+      {(showCurrent || showBlocking || showOutOfSequence) && (
         <>
           <hr />
           <strong>Indicators:</strong>
@@ -215,6 +236,12 @@ function GraphLegend({ categoriesUsed, showCurrent, showBlocking }) {
             <div className="legend-row">
               <span className="legend-star" style={{ color: BLOCKING_NODE_ICON_COLOR }}>★</span>
               Root cause blocker
+            </div>
+          )}
+          {showOutOfSequence && (
+            <div className="legend-row">
+              <span className="legend-swatch legend-swatch-outline" style={{ borderColor: OUT_OF_SEQUENCE_BORDER_COLOR, borderWidth: "3px" }} />
+              ⚠ Out of sequence (completed before its predecessor)
             </div>
           )}
         </>

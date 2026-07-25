@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { dashboardApi } from "../api/dashboard.js";
 
 /**
- * The original app's actual custom-query data source: wajha_special_query,
+ * The original app's actual custom-query data source: shams_elgroub_special_query,
  * a table whose columns aren't fixed ahead of time — the original
  * discovered them at runtime (getdynamoDBClientColumns) rather than
  * hardcoding a field list. This does the same: fetch the raw records

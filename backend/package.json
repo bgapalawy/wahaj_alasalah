@@ -1,7 +1,7 @@
 {
-  "name": "wajha-backend",
+  "name": "shams_elgroub-backend",
   "version": "1.0.0",
-  "description": "API layer for Wajha — owns all AWS/DynamoDB/S3 access so credentials never reach the browser.",
+  "description": "API layer for Shams_Elgroub — owns all AWS/DynamoDB/S3 access so credentials never reach the browser.",
   "type": "module",
   "main": "src/server.js",
   "scripts": {

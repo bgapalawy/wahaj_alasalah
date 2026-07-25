@@ -45,7 +45,7 @@ dashboardRouter.get("/all-villa-invoice-statuses", async (req, res, next) => {
 });
 
 // The original app's actual "custom query" data source: a dedicated
-// DynamoDB table (wajha_special_query) with villaID plus whatever
+// DynamoDB table (shams_elgroub_special_query) with villaID plus whatever
 // dynamic columns exist in it — the original discovered those columns
 // at runtime rather than hardcoding a field list, and let the user pick
 // any of them to filter/color by. Raw records returned as-is; the

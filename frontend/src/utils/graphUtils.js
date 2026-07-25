@@ -23,6 +23,7 @@ export const DEFAULT_ACTIVITY_COLOR = "#FFFFFF";
 export const PREDECESSOR_EDGE_COLOR = "#555555";
 export const BLOCKING_NODE_ICON_COLOR = "#FF0000";
 export const CURRENT_NODE_ICON_COLOR = "#000000";
+export const OUT_OF_SEQUENCE_BORDER_COLOR = "#F57C00"; // distinct orange — "blocking" (red star) means something else
 
 export function getCategory(tableItemId) {
   if (!tableItemId || typeof tableItemId !== "string") return "Default";

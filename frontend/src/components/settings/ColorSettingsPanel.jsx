@@ -1,17 +1,24 @@
 import { useState } from "react";
 import { useColorPreferences } from "../../contexts/ColorPreferencesContext.jsx";
 import { ITEM_STATUS_ORDER } from "../../config/itemStatusColors.js";
-import { SCHEDULE_STATUS_ORDER, INVOICE_STATUS_ORDER } from "../../config/scheduleInvoiceColors.js";
+import { SCHEDULE_STATUS_ORDER, INVOICE_STATUS_ORDER, OUT_OF_SEQUENCE_ORDER } from "../../config/scheduleInvoiceColors.js";
 
 const MODES = [
   { id: "status", label: "Item Status", order: ITEM_STATUS_ORDER },
   { id: "schedule", label: "Schedule", order: SCHEDULE_STATUS_ORDER },
   { id: "invoice", label: "Invoice", order: INVOICE_STATUS_ORDER },
+  { id: "outOfSequence", label: "Out of Sequence", order: OUT_OF_SEQUENCE_ORDER },
   { id: "overallStatus", label: "Overall Villa Status", order: ["NotStarted", "InProgress", "Completed"] },
   { id: "customQuery", label: "Custom Query", order: ["match", "noMatch"] },
 ];
 
-const DISPLAY_LABELS = { match: "Matches the query", noMatch: "Doesn't match" };
+const DISPLAY_LABELS = {
+  match: "Matches the query",
+  noMatch: "Doesn't match",
+  OutOfSequence: "Out of sequence",
+  OK: "Completed OK (in sequence)",
+  NotCompletedYet: "Not completed yet",
+};
 
 export function ColorSettingsPanel() {
   const { getColors, setColor, resetMode } = useColorPreferences();

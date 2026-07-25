@@ -1,4 +1,4 @@
-# Wajha — Restructure Plan
+# Shams_Elgroub — Restructure Plan
 
 ## Why restructure
 
@@ -8,7 +8,7 @@ Every function lives in the global scope, load order is load-bearing, and the
 AWS SDK + DynamoDB credentials run **directly in the browser** — anyone can open
 devtools and read them out of the network tab or the bundled JS.
 
-This plan moves Wajha to:
+This plan moves Shams_Elgroub to:
 
 - **`backend/`** — a small Node/Express API that owns all AWS/DynamoDB access.
   The browser never sees AWS credentials again; it only talks to your API.
@@ -18,7 +18,7 @@ This plan moves Wajha to:
 ## Monorepo layout
 
 ```
-wajha-app/
+shams_elgroub-app/
 ├── backend/
 │   ├── src/
 │   │   ├── server.js                 # Express app entrypoint
@@ -48,7 +48,7 @@ wajha-app/
     │   │   └── useVillas.js
     │   ├── components/
     │   │   ├── map/
-    │   │   │   ├── MapView.jsx        # replaces wajha_map_and_every_layer.js
+    │   │   │   ├── MapView.jsx        # replaces shams_elgroub_map_and_every_layer.js
     │   │   │   └── VillaLayer.jsx
     │   │   ├── panels/
     │   │   │   └── VillaDetailsPanel.jsx  # replaces left_click.js
@@ -74,7 +74,7 @@ wajha-app/
 | `js/functions/awsConfig.js` | `backend/src/config/aws.js` | moved server-side, credentials via `.env`, never shipped to browser |
 | `js/functions/awsFunctions.js` | `backend/src/services/*.js` | DynamoDB calls now live behind API routes |
 | `js/functions/sendandgetdata.js` | `frontend/src/api/*.js` | becomes typed `fetch` calls to your own API |
-| `js/functions/wajha_map_and_every_layer.js` | `frontend/src/components/map/MapView.jsx`, `VillaLayer.jsx` | Leaflet init + layer logic, filtering bypass removed once schema is fixed |
+| `js/functions/shams_elgroub_map_and_every_layer.js` | `frontend/src/components/map/MapView.jsx`, `VillaLayer.jsx` | Leaflet init + layer logic, filtering bypass removed once schema is fixed |
 | `js/functions/left_click.js` | `frontend/src/components/panels/VillaDetailsPanel.jsx` | popup HTML strings become JSX |
 | `js/functions/rightclick.js` | `frontend/src/components/graph/DependencyGraph.jsx` | vis-network wrapped in a component |
 | `js/functions/dashboardallproject.js` | `frontend/src/components/dashboard/AllProjectsDashboard.jsx` | Chart.js wrapped in a component |

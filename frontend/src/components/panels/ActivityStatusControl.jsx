@@ -6,7 +6,7 @@ const STATUS_OPTIONS = ACTIVITY_STATUS_OPTIONS; // NotStarted/NCR/Notes/Rejected
 
 /**
  * Lets you set an activity's status for a specific villa, with a
- * completion date when marking it Completed. Writes to wajhaData +
+ * completion date when marking it Completed. Writes to shams_elgroubData +
  * Actual_dates (see activityStatusService.js), and — matching the
  * original app — auto-marks the invoice "ReadyToPay" when transitioning
  * into Completed. If you're un-completing something whose invoice was

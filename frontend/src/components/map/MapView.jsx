@@ -15,7 +15,7 @@ import { computeScheduleStatusFast } from "../../utils/scheduleUtils.js";
 import { evaluateCustomQuery } from "../../utils/customQueryUtils.js";
 import { constructionItemsApi } from "../../api/constructionItems.js";
 import { ITEM_STATUS_ORDER } from "../../config/itemStatusColors.js";
-import { SCHEDULE_STATUS_ORDER, INVOICE_STATUS_ORDER } from "../../config/scheduleInvoiceColors.js";
+import { SCHEDULE_STATUS_ORDER, INVOICE_STATUS_ORDER, OUT_OF_SEQUENCE_ORDER } from "../../config/scheduleInvoiceColors.js";
 import { useColorPreferences } from "../../contexts/ColorPreferencesContext.jsx";
 
 // Fits the map to the loaded geometry's bounds instead of relying on a
@@ -100,7 +100,7 @@ export const MapView = forwardRef(function MapView({ onVillaClick, colorByItem, 
   // predecessor completion via the dependency graph) — fetched once,
   // independent of which item is selected, only when actually needed.
   const { data: allVillaStatuses, status: allVillaStatusesLoadStatus } = useAllVillaStatuses(
-    colorMode === "schedule" || customQueryConditions.length > 0,
+    colorMode === "schedule" || colorMode === "outOfSequence" || customQueryConditions.length > 0,
     refreshKey
   );
   const { data: allVillaInvoiceStatuses } = useAllVillaInvoiceStatuses(customQueryConditions.length > 0, refreshKey);
@@ -143,10 +143,36 @@ export const MapView = forwardRef(function MapView({ onVillaClick, colorByItem, 
     return lookup;
   }, [colorMode, itemRows, allVillaStatuses, constructionItemsTemplate.length, itemMaps, colorByItem, cutoffDate]);
 
+  // Colors the selected item, per villa, by whether it's Completed with
+  // an incomplete predecessor — see outOfSequenceUtils.js for the same
+  // rule used by the standalone Out of Sequence report; this is the
+  // per-item, on-the-map view of the same anomaly.
+  const outOfSequenceLookup = useMemo(() => {
+    if (colorMode !== "outOfSequence" || !itemRows || !allVillaStatuses || !colorByItem) return null;
+    const predecessors = colorByItem.predecessors ?? [];
+    const lookup = {};
+    itemRows.forEach((r) => {
+      if (r.actualStatus !== "Completed") {
+        lookup[r.villaID] = "NotCompletedYet";
+        return;
+      }
+      const villaStatusMap = allVillaStatuses[r.villaID] ?? {};
+      const hasIncompletePredecessor = predecessors.some((predId) => {
+        const predItem = itemMaps.itemById.get(predId);
+        if (!predItem) return false;
+        return villaStatusMap[predItem.TableItemID] !== "Completed";
+      });
+      lookup[r.villaID] = hasIncompletePredecessor ? "OutOfSequence" : "OK";
+    });
+    return lookup;
+  }, [colorMode, itemRows, allVillaStatuses, colorByItem, itemMaps]);
+
   const isLoading =
     colorMode === "schedule"
       ? itemDataLoadStatus === "loading" || allVillaStatusesLoadStatus === "loading" || (!!colorByItem && !scheduleLookup)
-      : itemDataLoadStatus === "loading";
+      : colorMode === "outOfSequence"
+        ? itemDataLoadStatus === "loading" || allVillaStatusesLoadStatus === "loading" || (!!colorByItem && !outOfSequenceLookup)
+        : itemDataLoadStatus === "loading";
 
   // Exposed to App.jsx so "Download PDF" can zoom out to fit BOTH the
   // villa parcels and the project boundary together, force every villa
@@ -398,7 +424,15 @@ export const MapView = forwardRef(function MapView({ onVillaClick, colorByItem, 
   }, [colorMode, selectedSpecialQueryColumn, columnValueLookup, selectedColumnValues, distinctColumnValues.length]);
 
   const itemStatusLookup =
-    colorMode === "status" ? statusLookup : colorMode === "invoice" ? invoiceLookup : colorMode === "schedule" ? scheduleLookup : columnValueLookup;
+    colorMode === "status"
+      ? statusLookup
+      : colorMode === "invoice"
+        ? invoiceLookup
+        : colorMode === "schedule"
+          ? scheduleLookup
+          : colorMode === "outOfSequence"
+            ? outOfSequenceLookup
+            : columnValueLookup;
   const activeColors = colorMode === "column" ? columnColors : getColors(colorMode);
   const activeOrder =
     colorMode === "status"
@@ -407,7 +441,9 @@ export const MapView = forwardRef(function MapView({ onVillaClick, colorByItem, 
         ? INVOICE_STATUS_ORDER
         : colorMode === "schedule"
           ? SCHEDULE_STATUS_ORDER
-          : selectedColumnValues;
+          : colorMode === "outOfSequence"
+            ? OUT_OF_SEQUENCE_ORDER
+            : selectedColumnValues;
 
   const customQueryVillaIDs = useMemo(() => {
     if (customQueryConditions.length === 0) return null;

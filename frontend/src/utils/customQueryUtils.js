@@ -12,7 +12,7 @@
  *   { type: "villaAttribute", field: "zonenum"|"blocknum"|"villatype"|"villaID",
  *     operator: "=" | "!=", value }
  *   { type: "specialQuery", column, operator: "=" | "!=", value }
- *     — reads from the wajha_special_query table (the original app's
+ *     — reads from the shams_elgroub_special_query table (the original app's
  *     actual custom-query data source), column chosen from whatever
  *     that table actually contains, not a fixed field list.
  *

@@ -108,9 +108,9 @@ async function migrateVillas() {
 
 // --- villa_item_status (merges 5 wide DDB tables into one long table) --
 async function migrateItemStatus() {
-  console.log(`\n== villa_item_status (merging wajhaData/plannedDates/plannedDatesFinish/actualDates/plannedCosts/actualCosts) ==`);
+  console.log(`\n== villa_item_status (merging shams_elgroubData/plannedDates/plannedDatesFinish/actualDates/plannedCosts/actualCosts) ==`);
   const [statusRows, plannedStart, plannedFinish, actualDates, plannedCosts, actualCosts] = await Promise.all([
-    scanEntireTable(tables.wajhaData),
+    scanEntireTable(tables.shams_elgroubData),
     scanEntireTable(tables.plannedDates),
     scanEntireTable(tables.plannedDatesFinish),
     scanEntireTable(tables.actualDates),
@@ -236,12 +236,54 @@ async function migrateInvoices() {
   }
 }
 
+// --- villa_special_query_values -------------------------------------------
+// This table was missed in the original migration pass entirely (caught
+// when a Special Query export came back empty) — unlike the other six
+// wide tables, nothing here ever populated villa_special_query_values.
+// Columns are arbitrary/user-defined (not real construction items), so
+// there's no fixed set to validate against — every column that isn't
+// villaID becomes a row.
+async function migrateSpecialQuery() {
+  console.log(`\n== villa_special_query_values (from DDB table "${tables.specialQuery}") ==`);
+  const rows = await scanEntireTable(tables.specialQuery);
+  const flatRows = [];
+  for (const row of rows) {
+    const { villaID, ...columns } = row;
+    if (!isValidVillaID(villaID)) continue;
+    for (const [columnName, value] of Object.entries(columns)) {
+      if (value === undefined || value === null || value === "") continue;
+      flatRows.push({ villaID, columnName, value: String(value) });
+    }
+  }
+  console.log(`  ${flatRows.length} (villa, column) special-query rows`);
+
+  if (!WRITE) return;
+  for (let i = 0; i < flatRows.length; i += BATCH_SIZE) {
+    const chunk = flatRows.slice(i, i + BATCH_SIZE);
+    const values = [];
+    const params = [];
+    chunk.forEach((r, idx) => {
+      const base = idx * 3;
+      values.push(`($${base + 1}, $${base + 2}, $${base + 3})`);
+      params.push(r.villaID, r.columnName, r.value);
+    });
+    await pool.query(
+      `INSERT INTO villa_special_query_values (villa_id, column_name, value)
+       VALUES ${values.join(", ")}
+       ON CONFLICT (villa_id, column_name) DO UPDATE SET value = EXCLUDED.value`,
+      params
+    );
+    console.log(`  wrote ${Math.min(i + BATCH_SIZE, flatRows.length)}/${flatRows.length}`);
+  }
+}
+
 async function main() {
   console.log(WRITE ? "*** WRITE MODE — this will insert/update rows in Postgres ***" : "--- DRY RUN (pass --write to actually write) ---");
   await migrateConstructionItems();
   await migrateVillas();
   await migrateItemStatus();
   await migrateInvoices();
+  await migrateSpecialQuery();
   console.log("\nDone.");
   await pool.end();
 }

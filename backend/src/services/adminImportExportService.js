@@ -1,58 +1,85 @@
-import { UpdateCommand } from "@aws-sdk/lib-dynamodb";
-import { ddb, tables } from "../config/aws.js";
-import { scanEntireTable } from "./wideTableService.js";
+import { query } from "../config/postgres.js";
+import { constructionItems } from "../data/constructionItems.js";
 
 /**
- * Ports the original app's uploadingtodatabasefromexcel.js — a genuinely
- * powerful bulk-write admin tool. Architecture differs from the original
- * on purpose: the original ran the AWS SDK directly in the browser and
- * parsed + wrote the Excel file all client-side. This app moved AWS
- * access server-side for security, so the split here is: the FRONTEND
- * parses the uploaded .xlsx file (using the xlsx library already a
- * dependency for exports elsewhere) and sends plain JSON rows here; this
- * service does the actual DynamoDB writes.
+ * MIGRATED to Postgres. This is the last file migrated in this project,
+ * deliberately saved for last since it's the highest-blast-radius write
+ * path (bulk imports touch potentially thousands of rows at once).
  *
- * Table names are validated against the known `tables` config (not
- * accepted as an arbitrary string from the request) so this can't be
- * pointed at some other AWS resource by a malformed request.
+ * The 8 DynamoDB "tables" the admin dropdown used to offer are now
+ * consolidated into just 3 Postgres tables (villa_item_status,
+ * villa_item_invoice, villa_special_query_values) — each old table now
+ * maps to one specific COLUMN instead of an entire table. IMPORT_TARGETS
+ * below is that mapping, and is the ONLY thing admin.routes.js's /tables
+ * endpoint needs to expose keys for — the frontend still just receives
+ * an opaque {value, label, isDateTable} list and round-trips `value`
+ * back on import/export, so nothing in AdminImportExport.jsx needed to
+ * change.
+ *
+ * Date handling is now simpler than it used to be: the old code had to
+ * convert dates to Excel serial numbers to match how DynamoDB's date
+ * tables stored them (isoDateToExcelSerial). Postgres DATE columns store
+ * real dates — the frontend already sends "YYYY-MM-DD" strings (parsed
+ * from Excel with cellDates:true), so those go straight into a
+ * parameterized query with no conversion needed at all.
  */
 
-const ALLOWED_TABLES = new Set(Object.values(tables).filter(Boolean));
+const IMPORT_TARGETS = {
+  shams_elgroubData: { table: "villa_item_status", column: "status", kind: "text" },
+  invoices: { table: "villa_item_invoice", column: "status", kind: "text" },
+  plannedDates: { table: "villa_item_status", column: "planned_start", kind: "date" },
+  plannedDatesFinish: { table: "villa_item_status", column: "planned_finish", kind: "date" },
+  actualDates: { table: "villa_item_status", column: "actual_date", kind: "date" },
+  plannedCosts: { table: "villa_item_status", column: "planned_cost", kind: "numeric" },
+  actualCosts: { table: "villa_item_status", column: "actual_cost", kind: "numeric" },
+  specialQuery: { table: "villa_special_query_values", column: "value", kind: "text", isEAV: true },
+};
 
-function assertKnownTable(tableName) {
-  if (!ALLOWED_TABLES.has(tableName)) {
-    const err = new Error(`"${tableName}" is not one of this app's known tables.`);
+export const IMPORT_TARGET_KEYS = Object.keys(IMPORT_TARGETS);
+
+function assertKnownTarget(tableName) {
+  if (!IMPORT_TARGETS[tableName]) {
+    const err = new Error(`"${tableName}" is not one of this app's known import/export targets.`);
     err.status = 400;
     throw err;
   }
 }
 
-/** Inverse of costDateNormalizers.excelSerialToISODate — verified to round-trip exactly. */
-function isoDateToExcelSerial(isoDateString) {
-  const date = new Date(`${isoDateString}T00:00:00Z`);
-  const utcDays = date.getTime() / 86400000;
-  return Math.round(utcDays + 25569);
+/** Parses one cell's raw Excel-derived value according to the target column's real type. */
+function parseCell(rawValue, kind) {
+  if (rawValue === undefined || rawValue === null || rawValue === "") return { skip: true };
+  if (kind === "numeric") {
+    const n = typeof rawValue === "number" ? rawValue : Number(String(rawValue).replace(/,/g, ""));
+    if (Number.isNaN(n)) return { skip: true };
+    return { value: n };
+  }
+  if (kind === "date") {
+    // Frontend already sends "YYYY-MM-DD" — just validate it roughly
+    // looks like a date rather than re-deriving it, and let Postgres's
+    // own ::date cast be the real validator.
+    const s = String(rawValue).trim();
+    if (!/^\d{4}-\d{2}-\d{2}/.test(s)) return { skip: true };
+    return { value: s.slice(0, 10) };
+  }
+  return { value: String(rawValue).trim() };
 }
 
 /**
- * Bulk-writes parsed Excel rows into a table. Each row is expected as
+ * Bulk-writes parsed Excel rows. Each row is expected as
  * { villaID: "V_1", "Civil-1": "2024-01-01" | 500 | "Completed", ... } —
- * first column is always the primary key (matches the original's
- * `headers[0]` convention), every other column becomes a SET on that
- * villa's wide item. Empty/blank cells are skipped (not written as
- * empty strings), matching the original's behavior.
- *
- * `isDateTable` mirrors the original's dateTables check — date columns
- * get converted to Excel serial numbers (matching how this app's date
- * tables are already stored, per costDateNormalizers.js) rather than
- * written as raw date strings.
- *
- * Writes run with bounded concurrency (20 at a time) rather than the
- * original's fully sequential loop (slow for real villa counts) or fully
- * unbounded parallel (risks throttling DynamoDB's write capacity).
+ * first column is the primary key, every other column becomes one
+ * upserted row in the target table (one per construction item / special
+ * query column). Unknown construction item IDs and unknown villa IDs
+ * are skipped and reported rather than crashing the whole batch — the
+ * foreign keys to villas/construction_items would reject them anyway,
+ * but doing it here gives a per-row error instead of failing the
+ * transaction.
  */
-export async function bulkImportRows(tableName, rows, isDateTable) {
-  assertKnownTable(tableName);
+export async function bulkImportRows(tableName, rows, _isDateTableFromClient) {
+  assertKnownTarget(tableName);
+  const target = IMPORT_TARGETS[tableName]; // kind/date-ness is ALWAYS determined server-side, never trusting the client flag
+
+  const validItemIds = target.isEAV ? null : new Set(constructionItems.map((c) => c.TableItemID));
 
   let successCount = 0;
   let errorCount = 0;
@@ -65,58 +92,39 @@ export async function bulkImportRows(tableName, rows, isDateTable) {
       errors.push({ villaID, error: "Missing villaID (primary key)" });
       return;
     }
+    const villaId = String(villaID).trim();
 
-    const updateExpression = [];
-    const expressionAttributeNames = {};
-    const expressionAttributeValues = {};
-    let i = 0;
+    for (const [column, rawValue] of Object.entries(columns)) {
+      const parsed = parseCell(rawValue, target.kind);
+      if (parsed.skip) continue;
 
-    for (const [column, value] of Object.entries(columns)) {
-      if (value === undefined || value === null || value === "") continue;
-
-      const nameKey = `#attr${i}`;
-      const valueKey = `:val${i}`;
-      expressionAttributeNames[nameKey] = column;
-
-      if (isDateTable) {
-        // Frontend sends dates as "YYYY-MM-DD" (parsed from Excel with
-        // cellDates:true) — convert to the Excel serial number this
-        // table's other rows already use, so reads via
-        // costDateNormalizers.excelSerialToISODate keep working.
-        const serial = isoDateToExcelSerial(String(value));
-        if (Number.isNaN(serial)) {
-          continue; // not a parseable date — skip this cell rather than write garbage
-        }
-        expressionAttributeValues[valueKey] = serial;
-      } else if (typeof value === "number") {
-        expressionAttributeValues[valueKey] = value;
-      } else {
-        expressionAttributeValues[valueKey] = String(value).trim();
+      if (!target.isEAV && !validItemIds.has(column)) {
+        errorCount++;
+        errors.push({ villaID: villaId, error: `"${column}" is not a known construction item — skipped` });
+        continue;
       }
 
-      updateExpression.push(`${nameKey} = ${valueKey}`);
-      i++;
-    }
-
-    if (updateExpression.length === 0) {
-      successCount++; // nothing to write for this row — not an error, matches original
-      return;
-    }
-
-    try {
-      await ddb.send(
-        new UpdateCommand({
-          TableName: tableName,
-          Key: { villaID: String(villaID).trim() },
-          UpdateExpression: "SET " + updateExpression.join(", "),
-          ExpressionAttributeNames: expressionAttributeNames,
-          ExpressionAttributeValues: expressionAttributeValues,
-        })
-      );
-      successCount++;
-    } catch (err) {
-      errorCount++;
-      errors.push({ villaID, error: err.message });
+      try {
+        if (target.isEAV) {
+          await query(
+            `INSERT INTO villa_special_query_values (villa_id, column_name, value)
+             VALUES ($1, $2, $3)
+             ON CONFLICT (villa_id, column_name) DO UPDATE SET value = EXCLUDED.value`,
+            [villaId, column, parsed.value]
+          );
+        } else {
+          await query(
+            `INSERT INTO villa_item_status (villa_id, table_item_id, ${target.column})
+             VALUES ($1, $2, $3)
+             ON CONFLICT (villa_id, table_item_id) DO UPDATE SET ${target.column} = EXCLUDED.${target.column}`,
+            [villaId, column, parsed.value]
+          );
+        }
+        successCount++;
+      } catch (err) {
+        errorCount++;
+        errors.push({ villaID: villaId, error: `${column}: ${err.message}` });
+      }
     }
   }
 
@@ -126,122 +134,60 @@ export async function bulkImportRows(tableName, rows, isDateTable) {
     await Promise.all(chunk.map(writeOneRow));
   }
 
-  return { successCount, errorCount, errors: errors.slice(0, 50) }; // cap error list, not meant as a full audit log
+  return { successCount, errorCount, errors: errors.slice(0, 50) };
 }
 
 /**
- * Every row in a table, raw — the frontend converts this to Excel via
- * the xlsx library (same pattern already used for every other "Download
- * Table" button in this app).
+ * Every row for a target, pivoted back to the same WIDE shape the
+ * DynamoDB version returned ({ villaID, "Civil-1": value, ... }) so the
+ * frontend's existing xlsx-export code needs no changes. Only villas
+ * with at least one non-null value for this target appear as a row,
+ * matching the old "only what's actually been entered" behavior.
  */
 export async function exportTableData(tableName) {
-  assertKnownTable(tableName);
-  return scanEntireTable(tableName);
+  assertKnownTarget(tableName);
+  const target = IMPORT_TARGETS[tableName];
+
+  const dateFormatted = target.kind === "date" ? `to_char(${target.column}, 'YYYY-MM-DD')` : target.column;
+  const { rows } = target.isEAV
+    ? await query(`SELECT villa_id, column_name AS item, value AS val FROM villa_special_query_values WHERE value IS NOT NULL`)
+    : await query(
+        `SELECT villa_id, table_item_id AS item, ${dateFormatted} AS val
+         FROM villa_item_status WHERE ${target.column} IS NOT NULL`
+      );
+
+  const byVilla = {};
+  for (const r of rows) {
+    byVilla[r.villa_id] ??= { villaID: r.villa_id };
+    byVilla[r.villa_id][r.item] = r.val;
+  }
+  return Object.values(byVilla);
 }
 
 /**
- * Ports "button_convert_readyToPay_to_Paid": every invoice currently
- * "ReadyToPay" becomes "Paid", across every villa/item. A genuinely bulk,
- * hard-to-undo operation — the frontend should confirm before calling this.
+ * Every invoice currently "ReadyToPay" becomes "Paid" — a genuinely
+ * bulk, hard-to-undo operation; the frontend confirms before calling it.
  */
 export async function convertReadyToPayToPaid() {
-  const items = await scanEntireTable(tables.invoices);
-  let updatedCount = 0;
-
-  async function processItem(item) {
-    const { villaID, ...columns } = item;
-    const toUpdate = Object.entries(columns).filter(([, status]) => status === "ReadyToPay");
-    if (toUpdate.length === 0) return;
-
-    const updateExpression = [];
-    const expressionAttributeNames = {};
-    const expressionAttributeValues = {};
-    toUpdate.forEach(([tableItemId], i) => {
-      const nameKey = `#attr${i}`;
-      const valueKey = `:val${i}`;
-      expressionAttributeNames[nameKey] = tableItemId;
-      expressionAttributeValues[valueKey] = "Paid";
-      updateExpression.push(`${nameKey} = ${valueKey}`);
-    });
-
-    await ddb.send(
-      new UpdateCommand({
-        TableName: tables.invoices,
-        Key: { villaID },
-        UpdateExpression: "SET " + updateExpression.join(", "),
-        ExpressionAttributeNames: expressionAttributeNames,
-        ExpressionAttributeValues: expressionAttributeValues,
-      })
-    );
-    updatedCount += toUpdate.length;
-  }
-
-  const CONCURRENCY = 20;
-  for (let i = 0; i < items.length; i += CONCURRENCY) {
-    const chunk = items.slice(i, i + CONCURRENCY);
-    await Promise.all(chunk.map(processItem));
-  }
-
-  return { updatedCount };
+  const result = await query(`UPDATE villa_item_invoice SET status = 'Paid' WHERE status = 'ReadyToPay'`);
+  return { updatedCount: result.rowCount };
 }
 
 /**
- * Ports "button_convert_Completed_fromProgresstable__to_readyToPay": a
- * bulk backfill — for every activity marked "Completed" in the real
- * status table (wajhaData) whose invoice ISN'T already ReadyToPay or
- * Paid, set its invoice to "ReadyToPay". This is the same rule as the
- * live auto-trigger in activityStatusService.updateActivityStatus, just
- * applied retroactively across everything already in the database
- * instead of only firing on new status changes going forward.
+ * For every activity marked "Completed" whose invoice isn't already
+ * ReadyToPay or Paid, set its invoice to ReadyToPay — same rule as the
+ * live auto-trigger in activityStatusService.updateActivityStatus,
+ * applied retroactively. Upserts (not just updates) since a completed
+ * activity might not have an invoice row at all yet.
  */
 export async function convertCompletedToReadyToPay() {
-  const [statusItems, invoiceItems] = await Promise.all([
-    scanEntireTable(tables.wajhaData),
-    scanEntireTable(tables.invoices),
-  ]);
-
-  const invoiceByVilla = new Map(invoiceItems.map((item) => [item.villaID, item]));
-  let updatedCount = 0;
-
-  async function processVilla(statusItem) {
-    const { villaID, ...statuses } = statusItem;
-    const invoiceItem = invoiceByVilla.get(villaID) ?? {};
-
-    const toUpdate = Object.entries(statuses).filter(([tableItemId, status]) => {
-      if (status !== "Completed") return false;
-      const currentInvoice = invoiceItem[tableItemId] ?? "NotStarted";
-      return currentInvoice !== "ReadyToPay" && currentInvoice !== "Paid";
-    });
-    if (toUpdate.length === 0) return;
-
-    const updateExpression = [];
-    const expressionAttributeNames = {};
-    const expressionAttributeValues = {};
-    toUpdate.forEach(([tableItemId], i) => {
-      const nameKey = `#attr${i}`;
-      const valueKey = `:val${i}`;
-      expressionAttributeNames[nameKey] = tableItemId;
-      expressionAttributeValues[valueKey] = "ReadyToPay";
-      updateExpression.push(`${nameKey} = ${valueKey}`);
-    });
-
-    await ddb.send(
-      new UpdateCommand({
-        TableName: tables.invoices,
-        Key: { villaID },
-        UpdateExpression: "SET " + updateExpression.join(", "),
-        ExpressionAttributeNames: expressionAttributeNames,
-        ExpressionAttributeValues: expressionAttributeValues,
-      })
-    );
-    updatedCount += toUpdate.length;
-  }
-
-  const CONCURRENCY = 20;
-  for (let i = 0; i < statusItems.length; i += CONCURRENCY) {
-    const chunk = statusItems.slice(i, i + CONCURRENCY);
-    await Promise.all(chunk.map(processVilla));
-  }
-
-  return { updatedCount };
+  const result = await query(
+    `INSERT INTO villa_item_invoice (villa_id, table_item_id, status)
+     SELECT s.villa_id, s.table_item_id, 'ReadyToPay'
+     FROM villa_item_status s
+     LEFT JOIN villa_item_invoice i ON i.villa_id = s.villa_id AND i.table_item_id = s.table_item_id
+     WHERE s.status = 'Completed' AND COALESCE(i.status, 'NotStarted') NOT IN ('ReadyToPay', 'Paid')
+     ON CONFLICT (villa_id, table_item_id) DO UPDATE SET status = 'ReadyToPay'`
+  );
+  return { updatedCount: result.rowCount };
 }

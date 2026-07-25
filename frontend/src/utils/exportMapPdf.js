@@ -12,7 +12,7 @@
  * as text once zoomed into in a PDF viewer, instead of dissolving into a
  * blur.
  */
-export async function downloadMapAsPDF(targetElement, filename = "wajha-map") {
+export async function downloadMapAsPDF(targetElement, filename = "shams_elgroub-map") {
   if (!targetElement) return;
 
   const [{ default: html2canvas }, { jsPDF }] = await Promise.all([

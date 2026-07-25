@@ -1,118 +1,91 @@
-import { tables } from "../config/aws.js";
-import { getManyVillaWideItems } from "./wideTableService.js";
-import { scanValidVillas } from "./villaService.js";
+import { query } from "../config/postgres.js";
 import { computeVillaStatus } from "./activityStatusService.js";
 import { constructionItems } from "../data/constructionItems.js";
-import { toCostNumber, toDateString } from "../utils/costDateNormalizers.js";
 import { getCategory } from "../utils/categoryUtils.js";
 
 /**
- * Portfolio-wide summary across every villa, PLUS a flat per-villa,
- * per-activity `records` array (one row per villa × construction item —
- * up to villaCount * 82 rows) that the frontend filters/aggregates for
- * the category pies, cost trend chart, top-items chart, and the detailed
- * data table. This mirrors the original dashboardallproject.js's
- * `constructionData` / `constructionDataActual` arrays, which did the
- * same "everything in the browser" approach.
+ * MIGRATED to Postgres. Same gap as allVillaStatusesService.js — missed
+ * in the original migration pass, was still doing 7 separate DynamoDB
+ * wide-table reads per call (1 scan + 6 batched reads) and merging them
+ * in JS. Now one query, CROSS JOINing every villa against every
+ * construction item (so all 82 items always appear per villa, matching
+ * the original's guaranteed-fixed-shape behavior) then LEFT JOINing the
+ * actual status/cost/date/invoice data on top.
  *
- * Cost: 1 villas scan, THEN 5 batched reads (plannedCosts, actualCosts,
- * plannedDates, plannedDatesFinish, actualDates/status) all in true
- * parallel — each chunked 100 villas at a time, so roughly
- * ~5 x ceil(villaCount/100) requests running concurrently, plus the one
- * scan. (Earlier version called listVillas(), which does its own
- * scan+status-batch internally, THEN separately re-batched Actual_dates
- * again here — the exact same table, fetched twice, and forced into two
- * sequential phases instead of one parallel one. Fixed by scanning once
- * and computing status from the same actualDates batch already needed
- * for the records array.)
- *
- * NOTE on `stage`: I'm including `villa.stage` in each record because the
- * original filtered by it, but I haven't confirmed your villas table
- * actually has a `stage` attribute (only `blocknum` was confirmed
- * earlier). If it's missing, stage will just show as null everywhere —
- * harmless, but worth checking your villas table schema if you want that
- * filter to actually do something.
+ * NOTE on `stage`: kept as null everywhere, same as the original —
+ * villas never actually had a confirmed `stage` attribute (only `block`
+ * was verified against real data).
  */
 export async function getAllProjectsDashboardData() {
-  const villas = await scanValidVillas();
-  const villaIDs = villas.map((v) => v.villaID).filter(Boolean);
+  const { rows } = await query(
+    `SELECT
+       v.villa_id                              AS "villaID",
+       v.block                                 AS "blocknum",
+       ci.table_item_id                        AS "TableItemID",
+       COALESCE(s.status, 'NotStarted')        AS "actualStatus",
+       s.planned_cost::float8                  AS "plannedCost",
+       s.actual_cost::float8                   AS "actualCost",
+       to_char(s.planned_start, 'YYYY-MM-DD')  AS "plannedStartDate",
+       to_char(s.planned_finish, 'YYYY-MM-DD') AS "plannedFinishDate",
+       to_char(s.actual_date, 'YYYY-MM-DD')    AS "actualCompletedDate",
+       COALESCE(i.status, 'NotStarted')        AS "invoiceStatus"
+     FROM villas v
+     CROSS JOIN construction_items ci
+     LEFT JOIN villa_item_status s
+       ON s.villa_id = v.villa_id AND s.table_item_id = ci.table_item_id
+     LEFT JOIN villa_item_invoice i
+       ON i.villa_id = v.villa_id AND i.table_item_id = ci.table_item_id
+     ORDER BY v.villa_id, ci.item_id`
+  );
 
-  const [
-    plannedCostsByVilla,
-    actualCostsByVilla,
-    plannedStartByVilla,
-    plannedFinishByVilla,
-    statusByVilla,
-    dateByVilla,
-    invoiceByVilla,
-  ] = await Promise.all([
-    getManyVillaWideItems(tables.plannedCosts, villaIDs),
-    getManyVillaWideItems(tables.actualCosts, villaIDs),
-    getManyVillaWideItems(tables.plannedDates, villaIDs),
-    getManyVillaWideItems(tables.plannedDatesFinish, villaIDs),
-    getManyVillaWideItems(tables.wajhaData, villaIDs), // real status, plain strings
-    getManyVillaWideItems(tables.actualDates, villaIDs), // completedDate only now
-    getManyVillaWideItems(tables.invoices, villaIDs),
-  ]);
+  const nameByTableItemId = new Map(constructionItems.map((item) => [item.TableItemID, item.name]));
 
-  const categoryTotals = {}; // { Civil: { planned, actual }, ... }
+  const categoryTotals = {};
   const records = [];
+  const byVilla = new Map(); // villaID -> { blocknum, statusMapForVilla, plannedCost, actualCost }
 
-  const villaSummaries = villas.map((villa) => {
-    const plannedItem = plannedCostsByVilla[villa.villaID] ?? {};
-    const actualItem = actualCostsByVilla[villa.villaID] ?? {};
-    const plannedStartItem = plannedStartByVilla[villa.villaID] ?? {};
-    const plannedFinishItem = plannedFinishByVilla[villa.villaID] ?? {};
-    const statusItem = statusByVilla[villa.villaID] ?? {};
-    const dateItem = dateByVilla[villa.villaID] ?? {};
-    const invoiceItem = invoiceByVilla[villa.villaID] ?? {};
+  for (const r of rows) {
+    const category = getCategory(r.TableItemID);
+    const planned = r.plannedCost ?? 0;
+    const actual = r.actualCost ?? 0;
 
-    let plannedCost = 0;
-    let actualCost = 0;
-    const statusMapForVilla = {};
+    categoryTotals[category] ??= { planned: 0, actual: 0 };
+    categoryTotals[category].planned += planned;
+    categoryTotals[category].actual += actual;
 
-    constructionItems.forEach((item) => {
-      const id = item.TableItemID;
-      const category = getCategory(id);
-      const planned = toCostNumber(plannedItem[id]);
-      const actual = toCostNumber(actualItem[id]);
-      const actualStatus = statusItem[id] ?? "NotStarted";
-      const actualCompletedDate = dateItem[id]?.completedDate ?? null;
-
-      plannedCost += planned;
-      actualCost += actual;
-      statusMapForVilla[id] = { status: actualStatus };
-
-      if (!categoryTotals[category]) categoryTotals[category] = { planned: 0, actual: 0 };
-      categoryTotals[category].planned += planned;
-      categoryTotals[category].actual += actual;
-
-      records.push({
-        villaID: villa.villaID,
-        blocknum: villa.blocknum ?? null,
-        stage: villa.stage ?? null, // see NOTE above — unconfirmed field
-        category,
-        item: item.name,
-        TableItemID: id,
-        plannedCost: planned,
-        actualCost: actual,
-        plannedStartDate: toDateString(plannedStartItem[id]),
-        plannedFinishDate: toDateString(plannedFinishItem[id]),
-        actualStatus,
-        actualCompletedDate,
-        invoiceStatus: invoiceItem[id] ?? "NotStarted",
-      });
+    records.push({
+      villaID: r.villaID,
+      blocknum: r.blocknum,
+      stage: null, // see NOTE above
+      category,
+      item: nameByTableItemId.get(r.TableItemID) ?? r.TableItemID,
+      TableItemID: r.TableItemID,
+      plannedCost: planned,
+      actualCost: actual,
+      plannedStartDate: r.plannedStartDate,
+      plannedFinishDate: r.plannedFinishDate,
+      actualStatus: r.actualStatus,
+      actualCompletedDate: r.actualCompletedDate,
+      invoiceStatus: r.invoiceStatus,
     });
 
-    return {
-      villaID: villa.villaID,
-      blocknum: villa.blocknum ?? null,
-      status: computeVillaStatus(statusMapForVilla),
-      plannedCost,
-      actualCost,
-      percentComplete: plannedCost > 0 ? (actualCost / plannedCost) * 100 : 0,
-    };
-  });
+    if (!byVilla.has(r.villaID)) {
+      byVilla.set(r.villaID, { blocknum: r.blocknum, statusMapForVilla: {}, plannedCost: 0, actualCost: 0 });
+    }
+    const villaAcc = byVilla.get(r.villaID);
+    villaAcc.statusMapForVilla[r.TableItemID] = { status: r.actualStatus };
+    villaAcc.plannedCost += planned;
+    villaAcc.actualCost += actual;
+  }
+
+  const villaSummaries = Array.from(byVilla.entries()).map(([villaID, acc]) => ({
+    villaID,
+    blocknum: acc.blocknum,
+    status: computeVillaStatus(acc.statusMapForVilla),
+    plannedCost: acc.plannedCost,
+    actualCost: acc.actualCost,
+    percentComplete: acc.plannedCost > 0 ? (acc.actualCost / acc.plannedCost) * 100 : 0,
+  }));
 
   const portfolioTotals = villaSummaries.reduce(
     (acc, v) => {

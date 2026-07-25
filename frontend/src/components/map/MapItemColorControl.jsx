@@ -11,6 +11,7 @@ const COLOR_MODES = [
   { id: "status", label: "Status" },
   { id: "schedule", label: "Schedule" },
   { id: "invoice", label: "Invoice" },
+  { id: "outOfSequence", label: "Out of Sequence" },
   { id: "column", label: "Column" },
 ];
 

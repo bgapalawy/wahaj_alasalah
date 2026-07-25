@@ -25,11 +25,11 @@ export const tables = {
   // your AWS console) — plain string values like "Completed"/"NotStarted"
   // directly on each TableItemID column, not the nested {status,
   // completedDate} shape Actual_dates uses. Actual_dates is still used for
-  // completedDate tracking; wajhaData is now the source of truth for
+  // completedDate tracking; shams_elgroubData is now the source of truth for
   // *current status* everywhere (villa status, map coloring, dashboards).
-  wajhaData: process.env.DDB_WAJHA_DATA_TABLE,
+  shams_elgroubData: process.env.DDB_WAJHA_DATA_TABLE,
   // Invoice status per villa/item — same plain-string wide-table shape as
-  // wajhaData, e.g. { villaID, "Civil-1": "ReadyToPay", ... }. Confirmed
+  // shams_elgroubData, e.g. { villaID, "Civil-1": "ReadyToPay", ... }. Confirmed
   // to already exist in the real AWS account.
   invoices: process.env.DDB_INVOICE_TABLE,
 };

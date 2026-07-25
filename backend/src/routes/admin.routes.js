@@ -5,36 +5,24 @@ import {
   convertReadyToPayToPaid,
   convertCompletedToReadyToPay,
 } from "../services/adminImportExportService.js";
-import { tables } from "../config/aws.js";
 
 export const adminRouter = Router();
 
-// Exposes which real table each label maps to, so the frontend's table
-// picker doesn't have to hardcode table names — matches the original
-// app's dropdown ("Wajha progress All", "Wajha Invoice total", etc).
-//
-// Filters out any entry whose table name isn't actually configured
-// (missing from backend/.env) rather than sending {value: undefined} —
-// a browser's <option value={undefined}> silently falls back to using
-// the option's TEXT as its value, which is exactly how a missing
-// DDB_INVOICE_TABLE env var turned into "Wajha invoice table" (the
-// label) being sent as a table name instead of the real one.
+// Exposes the semantic import/export target keys (see IMPORT_TARGETS in
+// adminImportExportService.js) — the frontend treats `value` as opaque,
+// just round-tripping it back on import/export, so these no longer need
+// to be real DynamoDB table names now that everything lives in Postgres.
 adminRouter.get("/tables", (req, res) => {
-  const allOptions = [
-    { value: tables.wajhaData, label: "Wajha progress (status) table", isDateTable: false },
-    { value: tables.invoices, label: "Wajha invoice table", isDateTable: false },
-    { value: tables.plannedDates, label: "Planned dates table", isDateTable: true },
-    { value: tables.plannedDatesFinish, label: "Planned dates (finish) table", isDateTable: true },
-    { value: tables.actualDates, label: "Actual dates table", isDateTable: true },
-    { value: tables.plannedCosts, label: "Planned costs table", isDateTable: false },
-    { value: tables.actualCosts, label: "Actual costs table", isDateTable: false },
-    { value: tables.specialQuery, label: "Special query table", isDateTable: false },
-  ];
-  const missing = allOptions.filter((t) => !t.value).map((t) => t.label);
-  if (missing.length > 0) {
-    console.warn(`Admin table picker: these tables are missing from backend/.env and won't be selectable: ${missing.join(", ")}`);
-  }
-  res.json(allOptions.filter((t) => Boolean(t.value)));
+  res.json([
+    { value: "shams_elgroubData", label: "Shams_Elgroub progress (status) table", isDateTable: false },
+    { value: "invoices", label: "Shams_Elgroub invoice table", isDateTable: false },
+    { value: "plannedDates", label: "Planned Start Date table", isDateTable: true },
+    { value: "plannedDatesFinish", label: "Planned dates (finish) table", isDateTable: true },
+    { value: "actualDates", label: "Actual Finish Date table", isDateTable: true },
+    { value: "plannedCosts", label: "Planned costs table", isDateTable: false },
+    { value: "actualCosts", label: "Actual costs table", isDateTable: false },
+    { value: "specialQuery", label: "Special query table", isDateTable: false },
+  ]);
 });
 
 adminRouter.post("/import", async (req, res, next) => {

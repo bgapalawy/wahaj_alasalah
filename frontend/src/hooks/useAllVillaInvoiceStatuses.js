@@ -4,7 +4,7 @@ import { dashboardApi } from "../api/dashboard.js";
 /**
  * Every real villa's full invoice status map — same shape and caching
  * behavior as useAllVillaStatuses, from the invoices table instead of
- * wajhaData. Used by the Custom Query builder, which can filter on
+ * shams_elgroubData. Used by the Custom Query builder, which can filter on
  * either an item's actual status or its invoice status.
  */
 export function useAllVillaInvoiceStatuses(enabled) {

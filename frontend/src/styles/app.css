@@ -51,8 +51,8 @@
   --shadow-md: 0 8px 24px rgba(15, 23, 42, 0.10), 0 2px 6px rgba(15, 23, 42, 0.06);
   --shadow-lg: 0 24px 48px rgba(15, 23, 42, 0.18), 0 4px 12px rgba(15, 23, 42, 0.08);
 
-  /* keeping this alias so older code paths referencing --wajha-blue keep working */
-  --wajha-blue: var(--color-primary);
+  /* keeping this alias so older code paths referencing --shams_elgroub-blue keep working */
+  --shams_elgroub-blue: var(--color-primary);
 }
 
 * {
@@ -270,6 +270,10 @@ button, input, select {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
+  flex: 1 1 auto;
+  min-height: 0; /* lets this flex child scroll internally instead of growing past the modal's fixed height */
+  overflow-y: auto;
+  padding: var(--space-5);
 }
 
 .admin-warning {
@@ -415,13 +419,126 @@ button, input, select {
   gap: var(--space-2);
 }
 
-.admin-convert-section h4 {
+.admin-convert-section summary {
   margin: 0;
   font-size: 0.85rem;
   font-weight: 700;
   color: #92400e;
   text-transform: uppercase;
   letter-spacing: 0.02em;
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+}
+
+.admin-convert-section summary::-webkit-details-marker {
+  display: none;
+}
+
+.admin-convert-section summary::after {
+  content: "▾";
+  margin-left: auto;
+  transition: transform 0.15s ease;
+}
+
+.admin-convert-section:not([open]) summary::after {
+  transform: rotate(-90deg);
+}
+
+.admin-convert-section[open] summary {
+  margin-bottom: var(--space-2);
+}
+
+.admin-table-select {
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+}
+
+.admin-io-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: var(--space-4);
+}
+
+.admin-io-card {
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.admin-io-card summary {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--color-text);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--color-border);
+  cursor: pointer;
+  list-style: none;
+}
+
+.admin-io-card summary::-webkit-details-marker {
+  display: none;
+}
+
+.admin-io-card summary::after {
+  content: "▾";
+  margin-left: auto;
+  color: var(--color-text-muted);
+  transition: transform 0.15s ease;
+}
+
+.admin-io-card:not([open]) summary::after {
+  transform: rotate(-90deg);
+}
+
+.admin-io-card[open] > summary {
+  margin-bottom: var(--space-1);
+}
+
+.admin-io-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  font-size: 0.85rem;
+  flex-shrink: 0;
+}
+
+.admin-io-card.is-upload .admin-io-icon {
+  background: var(--color-primary-light);
+  color: var(--color-primary-dark);
+}
+
+.admin-io-card.is-download .admin-io-icon {
+  background: #e0f2fe;
+  color: #0369a1;
+}
+
+.admin-filter-grid {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.admin-actions.is-block {
+  display: block;
+}
+
+.admin-actions.is-block button {
+  width: 100%;
 }
 
 
@@ -827,6 +944,7 @@ button, input, select {
 
 .map-color-mode-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 2px;
   margin-bottom: var(--space-2);
   background: var(--color-surface-alt);
@@ -835,15 +953,17 @@ button, input, select {
 }
 
 .map-color-mode-btn {
-  flex: 1;
-  padding: 0.35rem;
+  flex: 1 1 auto;
+  min-width: 4.2rem;
+  padding: 0.35rem 0.25rem;
   border: none;
   border-radius: calc(var(--radius-sm) - 2px);
   background: transparent;
-  font-size: 0.75rem;
+  font-size: 0.7rem;
   font-weight: 600;
   color: var(--color-text-muted);
   cursor: pointer;
+  white-space: nowrap;
 }
 
 .map-color-mode-btn.is-active {
@@ -1253,6 +1373,16 @@ button, input, select {
 .graph-modal-header button[aria-label="Close"]:hover {
   background: var(--color-danger-light);
   color: var(--color-danger);
+}
+
+.graph-modal-header.is-draggable {
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.graph-modal-header.is-draggable:active {
+  cursor: grabbing;
 }
 
 /* ============================================================

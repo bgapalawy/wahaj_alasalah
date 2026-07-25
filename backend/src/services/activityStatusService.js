@@ -5,7 +5,7 @@ import { autoUpdateInvoiceOnCompletion } from "./invoiceService.js";
 /**
  * Tracks per-villa, per-construction-item status + completion date.
  *
- * MIGRATED to Postgres — was two DynamoDB tables (wajhaData for status,
+ * MIGRATED to Postgres — was two DynamoDB tables (shams_elgroubData for status,
  * Actual_dates for completedDate) merged in JS. Now a single
  * villa_item_status table already has both columns (status, actual_date)
  * on the same row, from the migration that combined all six wide
@@ -28,7 +28,7 @@ export async function getActivityStatus(villaID, tableItemId) {
  * Returns every construction item's status for a villa — used to color
  * the dependency graph with real per-villa progress. Note: only items
  * that actually have a row appear as keys here (same as the old
- * DynamoDB version returning {} for a villa with no wajhaData entry at
+ * DynamoDB version returning {} for a villa with no shams_elgroubData entry at
  * all) — computeVillaStatus and downstream consumers already default
  * missing items to "NotStarted" via `?.status ?? "NotStarted"`, so this
  * doesn't need to pad in all 82 items itself.

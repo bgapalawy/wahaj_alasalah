@@ -2,6 +2,7 @@ import { Suspense, lazy, useRef, useState } from "react";
 import { downloadVectorLayoutPdf } from "./utils/buildVectorLayoutPdf.js";
 import { MapView } from "./components/map/MapView.jsx";
 import { VillaDetailsPanel } from "./components/panels/VillaDetailsPanel.jsx";
+import { useDraggable } from "./hooks/useDraggable.js";
 import "./styles/app.css";
 
 // Chart.js + xlsx are heavy — only load when the project dashboard opens.
@@ -14,12 +15,17 @@ const AdminImportExport = lazy(() =>
 const ColorSettingsPanel = lazy(() =>
   import("./components/settings/ColorSettingsPanel.jsx").then((m) => ({ default: m.ColorSettingsPanel }))
 );
+const OutOfSequenceReport = lazy(() =>
+  import("./components/dashboard/OutOfSequenceReport.jsx").then((m) => ({ default: m.OutOfSequenceReport }))
+);
 
 export default function App() {
   const [selectedVillaID, setSelectedVillaID] = useState(null);
   const [showProjectDashboard, setShowProjectDashboard] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
+  const { handleRef: adminDragHandleRef, style: adminDragStyle } = useDraggable();
   const [showColorSettings, setShowColorSettings] = useState(false);
+  const [showOutOfSequence, setShowOutOfSequence] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
   const [selectingArea, setSelectingArea] = useState(false);
   // Lifted up from MapView so the villa panel can pre-select the same
@@ -109,6 +115,9 @@ export default function App() {
           <button type="button" className="header-dashboard-btn" onClick={() => setShowProjectDashboard(true)}>
             Project Dashboard
           </button>
+          <button type="button" className="header-dashboard-btn" onClick={() => setShowOutOfSequence(true)}>
+            Out of Sequence
+          </button>
           <button type="button" className="header-admin-btn" onClick={() => setShowAdmin(true)}>
             Admin
           </button>
@@ -154,10 +163,16 @@ export default function App() {
         </div>
       )}
 
+      {showOutOfSequence && (
+        <Suspense fallback={null}>
+          <OutOfSequenceReport onClose={() => setShowOutOfSequence(false)} />
+        </Suspense>
+      )}
+
       {showAdmin && (
         <div className="graph-modal-backdrop" onClick={() => setShowAdmin(false)}>
-          <div className="graph-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="graph-modal-header">
+          <div className="graph-modal" style={adminDragStyle} onClick={(e) => e.stopPropagation()}>
+            <div className="graph-modal-header is-draggable" ref={adminDragHandleRef}>
               <h3>Admin — Import / Export</h3>
               <button type="button" onClick={() => setShowAdmin(false)} aria-label="Close">
                 ×
