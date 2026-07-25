@@ -6,36 +6,6 @@ const NOT_VILLA_STYLE = { color: "#c7cbd1", weight: 0.5, fillColor: "#e5e7eb", f
 const NEUTRAL_VILLA_STYLE = { color: "#1f2937", weight: 1, fillColor: "#dbeafe", fillOpacity: 0.4 };
 const HIGHLIGHT_COLOR = "#ea580c"; // safety-orange accent, consistent with the rest of the app
 
-// A label only shows once its parcel is at least this big on screen —
-// checked against real pixel size rather than a flat zoom cutoff, since
-// parcel size varies a lot across the site and a single zoom threshold
-// either hides labels somewhere they'd fit, or shows them somewhere they
-// still overlap.
-// Sized against the actual on-screen font (9px bold, see
-// .villa-label-tooltip below): a 4-digit number at 9px bold is roughly
-// 21-24px wide and the line itself is ~11-13px tall, so these are close
-// to the real floor rather than the old 45x24 margin, which was holding
-// labels back a full extra zoom step past where they'd already read
-// fine. Lowered twice now after feedback that labels still weren't
-// appearing on some parcels at a zoom level where they'd clearly fit —
-// paired with shrinking the tooltip font itself (11px -> 9px) so
-// there's less to fit, both together should surface labels noticeably
-// earlier without them overlapping.
-const LABEL_MIN_WIDTH_PX = 16;
-const LABEL_MIN_HEIGHT_PX = 9;
-
-// Export mode (forceAllLabels) needs a MUCH smaller threshold, paired
-// with a much smaller font (see .pdf-export-mode .villa-label-tooltip in
-// app.css) — at a full-site overview zoom, ~1,540 parcels are only a few
-// pixels each. Literally forcing every label open regardless of size (the
-// first version of this) just reproduced the overlapping-mess problem at
-// full scale. This is still not going to look reasonable — genuinely
-// unreadable with a fixed threshold on a raster capture — but tiny text
-// keeps it a compact texture instead of a wall of overlapping full-size
-// numbers, and still hides truly sliver-sized parcels.
-const EXPORT_LABEL_MIN_WIDTH_PX = 3;
-const EXPORT_LABEL_MIN_HEIGHT_PX = 2;
-
 /**
  * Renders villa parcel polygons, colored one of two ways:
  *  - default: flat neutral color for every real villa (no construction
@@ -185,44 +155,21 @@ export function VillaLayer({
   useEffect(() => {
     if (!layerRef.current) return;
     if (!showLabels && !forceAllLabels) return; // no tooltips exist to check at all — see onEachFeature
-    let debounceTimer = null;
 
     map.getContainer().classList.toggle("pdf-export-mode", forceAllLabels);
 
-    function updateLabelVisibility() {
-      layerRef.current.eachLayer((layer) => {
-        if (!layer.getTooltip?.()) return;
-        if (!showLabels) {
-          layer.closeTooltip();
-          return;
-        }
-        const bounds = layer.getBounds?.();
-        if (!bounds || !bounds.isValid()) return;
-        const nw = map.latLngToContainerPoint(bounds.getNorthWest());
-        const se = map.latLngToContainerPoint(bounds.getSouthEast());
-        const widthPx = Math.abs(se.x - nw.x);
-        const heightPx = Math.abs(se.y - nw.y);
-        const minWidth = forceAllLabels ? EXPORT_LABEL_MIN_WIDTH_PX : LABEL_MIN_WIDTH_PX;
-        const minHeight = forceAllLabels ? EXPORT_LABEL_MIN_HEIGHT_PX : LABEL_MIN_HEIGHT_PX;
-        const bigEnough = widthPx >= minWidth && heightPx >= minHeight;
-        if (bigEnough) layer.openTooltip();
-        else layer.closeTooltip();
-      });
-    }
-
-    function scheduleUpdate() {
-      clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(updateLabelVisibility, 120);
-    }
-
-    updateLabelVisibility();
-    map.on("zoomend", scheduleUpdate);
-    map.on("moveend", scheduleUpdate);
-    return () => {
-      clearTimeout(debounceTimer);
-      map.off("zoomend", scheduleUpdate);
-      map.off("moveend", scheduleUpdate);
-    };
+    // A deliberate "Show Villa Numbers" click means show them — full
+    // stop. The old pixel-size filtering made sense back when labels
+    // were on by default and needed to avoid cluttering the whole site
+    // view automatically; now that showing labels is an explicit action
+    // (and auto-hide-on-zoom already handles clutter during zoom/pan),
+    // silently refusing to show anything at overview zoom — with no
+    // feedback explaining why — just looked like the button was broken.
+    layerRef.current.eachLayer((layer) => {
+      if (!layer.getTooltip?.()) return;
+      if (showLabels || forceAllLabels) layer.openTooltip();
+      else layer.closeTooltip();
+    });
   }, [map, showLabels, forceAllLabels, displayGeojson]);
 
   const onEachFeature = useCallback(
@@ -266,5 +213,13 @@ export function VillaLayer({
 
   if (!geojson) return null;
 
-  return <GeoJSON ref={layerRef} data={displayGeojson} style={styleFn} onEachFeature={onEachFeature} />;
+  return (
+    <GeoJSON
+      key={`villa-layer-${showLabels}-${forceAllLabels}`}
+      ref={layerRef}
+      data={displayGeojson}
+      style={styleFn}
+      onEachFeature={onEachFeature}
+    />
+  );
 }

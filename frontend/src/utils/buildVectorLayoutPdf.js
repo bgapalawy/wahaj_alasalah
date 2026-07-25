@@ -59,6 +59,7 @@ export async function buildVectorLayoutPdf({
   titleText,
   subtitleText,
   projectName = "SHAMS EL GHROUB",
+  logos = [],
   drawingNumber = "SITE-001",
   drawnBy = "",
   checkedBy = "",
@@ -612,16 +613,53 @@ export async function buildVectorLayoutPdf({
     doc.text(text.toUpperCase(), x + cellPad, y + cellPad + 1.2 * K);
   }
 
-  // Cell 1 — project identity
+  // Cell 1 — project identity + logos side by side
   cellLabel(colX[0], tbY, "Project");
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(15 * K);
+  doc.setFontSize(13 * K);
   doc.setTextColor(INK[0], INK[1], INK[2]);
-  doc.text(projectName, colX[0] + cellPad, tbY + tbH * 0.5);
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(8 * K);
-  doc.setTextColor(68, 68, 68);
-  doc.text("Residential Development \u2014 Site Plan", colX[0] + cellPad, tbY + tbH * 0.75);
+  doc.text(projectName, colX[0] + cellPad, tbY + cellPad + 5 * K);
+
+  // Only logos that actually have an image or caption take up space — an
+  // empty slot (no logo uploaded for it) is skipped entirely rather than
+  // reserving a blank column.
+  const activeLogos = (logos ?? []).filter((l) => l?.logoDataUrl || l?.caption);
+  if (activeLogos.length > 0) {
+    const logosTop = tbY + cellPad + 7 * K;
+    const availH = tbH - (logosTop - tbY) - cellPad;
+    const captionH = 4 * K;
+    const logoH = Math.max(availH - captionH, availH * 0.6); // logo gets most of the remaining height, not divided among captions
+    const colWidth = (colW[0] - cellPad * 2) / activeLogos.length;
+
+    activeLogos.forEach((logo, i) => {
+      const cellCenterX = colX[0] + cellPad + colWidth * i + colWidth / 2;
+
+      if (logo.logoDataUrl) {
+        try {
+          const props = doc.getImageProperties(logo.logoDataUrl);
+          const maxLogoW = colWidth * 0.88; // small gutter between adjacent logos
+          let logoW = logoH * (props.width / props.height);
+          let drawH = logoH;
+          if (logoW > maxLogoW) {
+            // Width-constrained instead — keep aspect ratio, just shorter
+            drawH = maxLogoW / (props.width / props.height);
+            logoW = maxLogoW;
+          }
+          doc.addImage(logo.logoDataUrl, props.fileType, cellCenterX - logoW / 2, logosTop, logoW, drawH);
+        } catch {
+          // Bad/unsupported image data — fall back to caption-only for
+          // this one logo rather than failing the whole export.
+        }
+      }
+
+      if (logo.caption) {
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(6.5 * K);
+        doc.setTextColor(68, 68, 68);
+        doc.text(logo.caption, cellCenterX, tbY + tbH - cellPad, { align: "center" });
+      }
+    });
+  }
 
   // Cell 2 — drawing title
   cellLabel(colX[1], tbY, "Drawing Title");

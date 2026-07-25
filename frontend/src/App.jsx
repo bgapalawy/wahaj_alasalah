@@ -1,5 +1,6 @@
 import { Suspense, lazy, useRef, useState } from "react";
 import { downloadVectorLayoutPdf } from "./utils/buildVectorLayoutPdf.js";
+import { settingsApi } from "./api/settings.js";
 import { MapView } from "./components/map/MapView.jsx";
 import { VillaDetailsPanel } from "./components/panels/VillaDetailsPanel.jsx";
 import { useDraggable } from "./hooks/useDraggable.js";
@@ -27,6 +28,7 @@ export default function App() {
   const [showAdmin, setShowAdmin] = useState(false);
   const { handleRef: adminDragHandleRef, style: adminDragStyle } = useDraggable();
   const [showColorSettings, setShowColorSettings] = useState(false);
+  const [labelsEnabled, setLabelsEnabled] = useState(false);
   const [showOutOfSequence, setShowOutOfSequence] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
   const [selectingArea, setSelectingArea] = useState(false);
@@ -46,6 +48,43 @@ export default function App() {
   const [dataRefreshKey, setDataRefreshKey] = useState(0);
   const bumpDataRefresh = () => setDataRefreshKey((k) => k + 1);
 
+  // jsPDF's addImage() needs actual image data, not a remote URL, so
+  // each logo (served from a presigned S3 URL) has to be fetched and
+  // converted to a data URL before it can be drawn into the PDF.
+  async function getBrandingForPdf() {
+    let settings;
+    try {
+      settings = await settingsApi.getBranding();
+    } catch {
+      // Branding is a nice-to-have on the PDF, not a reason to fail the
+      // whole export if even fetching the settings themselves fails.
+      return {};
+    }
+
+    const logos = await Promise.all(
+      (settings.logos ?? []).map(async (logo) => {
+        if (!logo.logoUrl) return { caption: logo.caption, logoDataUrl: null };
+        try {
+          const response = await fetch(logo.logoUrl);
+          const blob = await response.blob();
+          const logoDataUrl = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          });
+          return { caption: logo.caption, logoDataUrl };
+        } catch {
+          // This one logo failed to fetch/convert — show its caption
+          // (if any) without the image rather than losing every other
+          // logo and the project name over one bad file.
+          return { caption: logo.caption, logoDataUrl: null };
+        }
+      })
+    );
+    return { projectName: settings.projectName, logos };
+  }
+
   // Direct PDF download — TRUE VECTOR. buildVectorLayoutPdf draws the
   // whole layout sheet (parcels, labels, frame, graticule, title block,
   // legend, scale bar) as PDF vector primitives via jsPDF. No canvas,
@@ -57,7 +96,8 @@ export default function App() {
     setExportingPdf(true);
     try {
       const ctx = mapViewRef.current?.getPrintContext();
-      if (ctx) await downloadVectorLayoutPdf({ ...ctx, paperSize }, "ShamsElGhroub_SiteMap");
+      const branding = await getBrandingForPdf();
+      if (ctx) await downloadVectorLayoutPdf({ ...ctx, ...branding, paperSize, drawnBy: loggedInUser }, "ShamsElGhroub_SiteMap");
     } finally {
       setExportingPdf(false);
     }
@@ -80,7 +120,8 @@ export default function App() {
     setExportingPdf(true);
     try {
       const ctx = mapViewRef.current?.getPrintContext({ printWindow });
-      if (ctx) await downloadVectorLayoutPdf({ ...ctx, paperSize }, "ShamsElGhroub_SelectedArea");
+      const branding = await getBrandingForPdf();
+      if (ctx) await downloadVectorLayoutPdf({ ...ctx, ...branding, paperSize, drawnBy: loggedInUser }, "ShamsElGhroub_SelectedArea");
     } finally {
       setExportingPdf(false);
     }
@@ -146,6 +187,8 @@ export default function App() {
           colorByItem={colorByItem}
           onColorByItemChange={setColorByItem}
           refreshKey={dataRefreshKey}
+          labelsEnabled={labelsEnabled}
+          onLabelsEnabledChange={setLabelsEnabled}
         />
         <VillaDetailsPanel
           villaID={selectedVillaID}

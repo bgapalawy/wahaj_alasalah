@@ -111,17 +111,26 @@ button, input, select {
   justify-content: space-between;
   box-shadow: var(--shadow-sm);
   z-index: 10;
+  gap: var(--space-3);
 }
 
 .app-header h1 {
   font-size: 1.15rem;
   font-weight: 700;
   letter-spacing: -0.02em;
+  flex-shrink: 0;
 }
 
 .app-header-actions {
   display: flex;
   gap: var(--space-2);
+  overflow-x: auto;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
+}
+
+.app-header-actions > * {
+  flex-shrink: 0;
 }
 
 .header-dashboard-btn {
@@ -767,24 +776,224 @@ button, input, select {
   bottom: var(--space-4);
   right: var(--space-4);
   z-index: 1000;
-  border: none;
-  border-radius: var(--radius-pill);
-  padding: 0.55rem 1rem;
-  font-size: 0.85rem;
-  font-weight: 600;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 0.65rem 1rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
   cursor: pointer;
   background: var(--color-surface);
-  color: var(--color-text);
+  color: var(--color-text-muted);
   box-shadow: var(--shadow-md);
 }
 
 .map-labels-toggle.is-active {
-  background: var(--color-primary);
-  color: white;
+  color: var(--color-primary);
+  border-color: var(--color-primary);
 }
 
 .map-labels-toggle:hover {
-  filter: brightness(0.97);
+  background: var(--color-surface-alt);
+}
+
+.map-branding {
+  position: absolute;
+  top: var(--space-4);
+  right: var(--space-4);
+  z-index: 1000;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  width: 170px;
+  max-height: calc(100vh - 8rem);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.map-branding.is-editing {
+  width: 260px;
+}
+
+.map-branding-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 0.65rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.map-branding-header-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.map-branding-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex-shrink: 0;
+}
+
+.map-branding-edit-icon-btn,
+.map-branding-collapse-btn {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  cursor: pointer;
+  font-size: 0.65rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.map-branding-edit-icon-btn:hover,
+.map-branding-collapse-btn:hover {
+  background: var(--color-surface-alt);
+}
+
+.map-branding-body {
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  overflow-y: auto;
+  text-align: center;
+}
+
+.map-branding-logo-row {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+  padding-top: 0.4rem;
+  border-top: 1px solid var(--color-border);
+  width: 100%;
+}
+
+.map-branding-logo-row:first-of-type {
+  border-top: none;
+  padding-top: 0;
+}
+
+.map-branding-logo {
+  max-width: 120px;
+  max-height: 50px;
+  object-fit: contain;
+}
+
+.map-branding-caption {
+  font-size: 0.68rem;
+  color: var(--color-text-muted);
+}
+
+.map-branding-name {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.map-branding-editing {
+  align-items: stretch;
+  text-align: left;
+}
+
+.map-branding-logo-slot {
+  border-top: 1px solid var(--color-border);
+  padding-top: 0.5rem;
+  margin-top: 0.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.map-branding-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+.map-branding-field input[type="text"] {
+  font-weight: normal;
+  padding: 0.4rem 0.5rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border-strong);
+  font-size: 0.85rem;
+}
+
+.map-branding-field input[type="file"] {
+  font-size: 0.75rem;
+}
+
+.map-branding-hint {
+  font-size: 0.7rem;
+  color: var(--color-text-muted);
+  margin: 0;
+}
+
+.map-branding-delete-btn {
+  align-self: flex-start;
+  border: 1px solid var(--color-danger);
+  color: var(--color-danger);
+  background: none;
+  border-radius: var(--radius-sm);
+  padding: 0.25rem 0.6rem;
+  font-size: 0.7rem;
+  cursor: pointer;
+}
+
+.map-branding-delete-btn:hover:not(:disabled) {
+  background: var(--color-danger-light);
+}
+
+.map-branding-delete-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.map-branding-error {
+  font-size: 0.75rem;
+  color: var(--color-danger);
+  margin: 0;
+}
+
+.map-branding-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+
+.map-branding-actions button {
+  flex: 1;
+  padding: 0.4rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-surface);
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+
+.map-branding-actions button:first-child {
+  background: var(--color-primary);
+  color: white;
+  border-color: var(--color-primary);
 }
 
 .map-item-color-control {

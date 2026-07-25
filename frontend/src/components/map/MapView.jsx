@@ -5,6 +5,7 @@ import { VillaLayer } from "./VillaLayer.jsx";
 import { BoundaryLayer } from "./BoundaryLayer.jsx";
 import { MapPanControl } from "./MapPanControl.jsx";
 import { MapItemColorControl } from "./MapItemColorControl.jsx";
+import { ProjectBranding } from "./ProjectBranding.jsx";
 import { MAP_DEFAULTS, GEOJSON_URL, BOUNDARY_GEOJSON_URL } from "../../config/mapConfig.js";
 import { cachedJsonFetch } from "../../utils/cachedFetch.js";
 import { useConstructionItemData } from "../../hooks/useConstructionItemData.js";
@@ -705,6 +706,8 @@ export const MapView = forwardRef(function MapView(
       >
         {labelsEnabled ? "🏷️ Hide Villa Numbers" : "🏷️ Show Villa Numbers"}
       </button>
+
+      <ProjectBranding />
 
       <MapItemColorControl
         selectedItem={colorByItem}

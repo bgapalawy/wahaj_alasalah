@@ -11,6 +11,13 @@ const VALID_ITEM_IDS = new Set(constructionItems.map((i) => i.TableItemID));
 // or "...-Approval" (no trailing index for that one category).
 const PREFIX_PATTERN = /^(.+)-VillaID:([^-]+)-(NotStarted\d+|NCR\d+|Notes\d+|Rejected\d+|Completed\d+|Approval)$/;
 
+// The fixed, non-villa prefixes this app uses — the project's 5 shared
+// logo slots (see projectSettingsService.js). Hardcoded here rather than
+// derived from anything client-supplied, so there's no injection
+// surface: these exact strings are the only non-villa values ever
+// accepted.
+const BRANDING_LOGO_PREFIXES = new Set(["branding-logo-1", "branding-logo-2", "branding-logo-3", "branding-logo-4", "branding-logo-5"]);
+
 /**
  * Without this, the upload/download/delete endpoints accepted any
  * client-supplied prefix string with no check it corresponds to real
@@ -21,6 +28,8 @@ const PREFIX_PATTERN = /^(.+)-VillaID:([^-]+)-(NotStarted\d+|NCR\d+|Notes\d+|Rej
  */
 export async function isValidUploadPrefix(prefix) {
   if (typeof prefix !== "string") return false;
+  if (BRANDING_LOGO_PREFIXES.has(prefix)) return true;
+
   const match = prefix.match(PREFIX_PATTERN);
   if (!match) return false;
 

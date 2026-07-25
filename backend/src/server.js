@@ -7,6 +7,7 @@ import { uploadRouter } from "./routes/upload.routes.js";
 import { constructionItemsRouter } from "./routes/constructionItems.routes.js";
 import { dashboardRouter } from "./routes/dashboard.routes.js";
 import { adminRouter } from "./routes/admin.routes.js";
+import { settingsRouter } from "./routes/settings.routes.js";
 import { authRouter } from "./routes/auth.routes.js";
 import { requireAuth } from "./middleware/auth.js";
 import { errorHandler } from "./middleware/errorHandler.js";
@@ -64,6 +65,7 @@ app.use("/api/villas", requireAuth, villasRouter);
 app.use("/api/uploads", requireAuth, uploadRouter);
 app.use("/api/construction-items", requireAuth, constructionItemsRouter);
 app.use("/api/dashboard", requireAuth, dashboardRouter);
+app.use("/api/settings", requireAuth, settingsRouter);
 app.use("/api/admin", requireAuth, adminLimiter, adminRouter);
 
 app.use(errorHandler);
