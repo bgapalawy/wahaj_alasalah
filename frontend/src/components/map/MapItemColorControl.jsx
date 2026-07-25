@@ -66,6 +66,8 @@ export function MapItemColorControl({
   onHighlightZonesChange,
   showBoundary,
   onShowBoundaryChange,
+  labelsEnabled,
+  onLabelsEnabledChange,
   customQueryConditions = [],
   onCustomQueryConditionsChange,
   villaMetaByID = {},
@@ -256,6 +258,11 @@ export function MapItemColorControl({
           <label className="map-boundary-toggle">
             <input type="checkbox" checked={showBoundary} onChange={(e) => onShowBoundaryChange(e.target.checked)} />
             Show project boundary
+          </label>
+
+          <label className="map-boundary-toggle">
+            <input type="checkbox" checked={labelsEnabled} onChange={(e) => onLabelsEnabledChange(e.target.checked)} />
+            Show villa number labels
           </label>
 
           {(remainingCount !== null || totalProjectVillas !== null) && (

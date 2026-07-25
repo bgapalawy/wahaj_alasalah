@@ -53,6 +53,7 @@ export const MapView = forwardRef(function MapView({ onVillaClick, colorByItem, 
   const [highlightBlocks, setHighlightBlocks] = useState([]);
   const [highlightZones, setHighlightZones] = useState([]);
   const [showBoundary, setShowBoundary] = useState(false);
+  const [labelsEnabled, setLabelsEnabled] = useState(true);
   const [colorMode, setColorMode] = useState("status"); // status | schedule | invoice | column
   const [selectedSpecialQueryColumn, setSelectedSpecialQueryColumn] = useState("");
   const [selectedColumnValues, setSelectedColumnValues] = useState([]);
@@ -662,6 +663,7 @@ export const MapView = forwardRef(function MapView({ onVillaClick, colorByItem, 
           customQueryColors={customQueryConditions.length > 0 ? getColors("customQuery") : null}
           forceAllLabels={forceAllLabels}
           showBoundary={showBoundary}
+          showLabels={labelsEnabled}
           onVillaClick={onVillaClick}
         />
         <BoundaryLayer geojson={boundaryGeojson} visible={showBoundary || forceAllLabels} />
@@ -715,6 +717,8 @@ export const MapView = forwardRef(function MapView({ onVillaClick, colorByItem, 
         onClearStatusHighlight={clearStatusHighlight}
         showBoundary={showBoundary}
         onShowBoundaryChange={setShowBoundary}
+        labelsEnabled={labelsEnabled}
+        onLabelsEnabledChange={setLabelsEnabled}
         customQueryConditions={customQueryConditions}
         onCustomQueryConditionsChange={setCustomQueryConditions}
         villaMetaByID={villaMetaByID}

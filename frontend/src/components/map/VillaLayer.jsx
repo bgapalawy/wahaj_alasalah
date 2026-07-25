@@ -193,6 +193,7 @@ export function VillaLayer({
   // up several of these full passes back to back and froze the tab.
   useEffect(() => {
     if (!layerRef.current) return;
+    if (!showLabels && !forceAllLabels) return; // no tooltips exist to check at all — see onEachFeature
     let debounceTimer = null;
 
     map.getContainer().classList.toggle("pdf-export-mode", forceAllLabels);
@@ -238,29 +239,38 @@ export function VillaLayer({
       const villaID = feature.properties?.villaID;
       if (!villaID || villaID === "NOT_VILLA") return; // not a real villa — no click, no label
 
-      // Normally villanum ("40") mirrors villaID ("V_40") exactly, but a
-      // handful of real, clickable villas turned up with a missing or
-      // stale villanum despite a perfectly valid villaID — invisible on
-      // the map at any zoom even though the popup (driven by villaID)
-      // opened fine. Rather than depend on villanum being trustworthy,
-      // fall back to stripping any leading non-digits off villaID itself
-      // so the same identifier that already proved reliable for clicks
-      // also guarantees a label.
-      const rawVillanum = feature.properties?.villanum;
-      const derivedFromID = String(villaID).replace(/^\D+/, "");
-      const labelText = rawVillanum && rawVillanum !== "NOT_VILLA" ? String(rawVillanum) : derivedFromID;
+      // Skip creating the tooltip at all when labels are toggled off,
+      // rather than creating all ~1,540 permanent tooltips and hiding
+      // them after the fact via closeTooltip() — each bindTooltip({
+      // permanent: true }) immediately does real DOM/layer work (this
+      // is what the "addLayer -> openTooltip" cost in the performance
+      // profile was), so skipping it entirely when not wanted is a real
+      // saving, not just a visual one.
+      if (showLabels || forceAllLabels) {
+        // Normally villanum ("40") mirrors villaID ("V_40") exactly, but a
+        // handful of real, clickable villas turned up with a missing or
+        // stale villanum despite a perfectly valid villaID — invisible on
+        // the map at any zoom even though the popup (driven by villaID)
+        // opened fine. Rather than depend on villanum being trustworthy,
+        // fall back to stripping any leading non-digits off villaID itself
+        // so the same identifier that already proved reliable for clicks
+        // also guarantees a label.
+        const rawVillanum = feature.properties?.villanum;
+        const derivedFromID = String(villaID).replace(/^\D+/, "");
+        const labelText = rawVillanum && rawVillanum !== "NOT_VILLA" ? String(rawVillanum) : derivedFromID;
 
-      if (labelText) {
-        layer.bindTooltip(labelText, {
-          permanent: true,
-          direction: "center",
-          className: "villa-label-tooltip",
-        });
+        if (labelText) {
+          layer.bindTooltip(labelText, {
+            permanent: true,
+            direction: "center",
+            className: "villa-label-tooltip",
+          });
+        }
       }
 
       layer.on("click", () => onVillaClick?.(villaID, feature));
     },
-    [onVillaClick]
+    [onVillaClick, showLabels, forceAllLabels]
   );
 
   if (!geojson) return null;
