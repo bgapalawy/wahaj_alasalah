@@ -69,10 +69,26 @@ export function VillaLayer({
   customQueryColors = null,
   showLabels = true,
   forceAllLabels = false,
+  showBoundary = false,
   onVillaClick,
 }) {
   const layerRef = useRef(null);
   const map = useMap();
+
+  // NOT_VILLA parcels (roads, common areas, non-villa land) are ~71% of
+  // this file's total features (5,439 total vs 1,540 real villas) but
+  // were being rendered unconditionally — a big chunk of the map's real
+  // rendering cost on every zoom/pan for shapes that convey no per-villa
+  // information. Now only included when someone actually wants that
+  // context (the boundary toggle, or a PDF export needing the full site).
+  const displayGeojson = useMemo(() => {
+    if (!geojson) return geojson;
+    if (showBoundary || forceAllLabels) return geojson;
+    return {
+      ...geojson,
+      features: geojson.features.filter((f) => f.properties?.villaID && f.properties.villaID !== "NOT_VILLA"),
+    };
+  }, [geojson, showBoundary, forceAllLabels]);
 
   const styleFn = useMemo(
     () => (feature) => {
@@ -215,7 +231,7 @@ export function VillaLayer({
       map.off("zoomend", scheduleUpdate);
       map.off("moveend", scheduleUpdate);
     };
-  }, [map, showLabels, forceAllLabels, geojson]);
+  }, [map, showLabels, forceAllLabels, displayGeojson]);
 
   const onEachFeature = useCallback(
     (feature, layer) => {
@@ -249,5 +265,5 @@ export function VillaLayer({
 
   if (!geojson) return null;
 
-  return <GeoJSON ref={layerRef} data={geojson} style={styleFn} onEachFeature={onEachFeature} />;
+  return <GeoJSON ref={layerRef} data={displayGeojson} style={styleFn} onEachFeature={onEachFeature} />;
 }

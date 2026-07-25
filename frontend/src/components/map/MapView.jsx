@@ -649,6 +649,7 @@ export const MapView = forwardRef(function MapView({ onVillaClick, colorByItem, 
         style={{ height: "100%", width: "100%" }}
         preferCanvas
         zoomAnimation={false}
+        scrollWheelZoom={false}
       >
         <VillaLayer
           geojson={geojson}
@@ -660,6 +661,7 @@ export const MapView = forwardRef(function MapView({ onVillaClick, colorByItem, 
           customQueryVillaIDs={customQueryVillaIDs}
           customQueryColors={customQueryConditions.length > 0 ? getColors("customQuery") : null}
           forceAllLabels={forceAllLabels}
+          showBoundary={showBoundary}
           onVillaClick={onVillaClick}
         />
         <BoundaryLayer geojson={boundaryGeojson} visible={showBoundary || forceAllLabels} />
