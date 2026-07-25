@@ -40,6 +40,19 @@ function FitToBounds({ geojson }) {
   return null;
 }
 
+// Villa number labels default to off and auto-hide the instant any zoom
+// starts (wheel, +/- buttons, or double-click) — the user re-enables
+// them deliberately via the floating toggle when they actually want to
+// read numbers, rather than labels persisting through every zoom step.
+function HideLabelsOnZoom({ onZoomStart }) {
+  const map = useMap();
+  useEffect(() => {
+    map.on("zoomstart", onZoomStart);
+    return () => map.off("zoomstart", onZoomStart);
+  }, [map, onZoomStart]);
+  return null;
+}
+
 export const MapView = forwardRef(function MapView({ onVillaClick, colorByItem, onColorByItemChange, refreshKey = 0 }, ref) {
   const { getColors, getColumnColors, setColumnColor, resetColumnColors } = useColorPreferences();
   const [geojson, setGeojson] = useState(null);
@@ -53,7 +66,7 @@ export const MapView = forwardRef(function MapView({ onVillaClick, colorByItem, 
   const [highlightBlocks, setHighlightBlocks] = useState([]);
   const [highlightZones, setHighlightZones] = useState([]);
   const [showBoundary, setShowBoundary] = useState(false);
-  const [labelsEnabled, setLabelsEnabled] = useState(true);
+  const [labelsEnabled, setLabelsEnabled] = useState(false);
   const [colorMode, setColorMode] = useState("status"); // status | schedule | invoice | column
   const [selectedSpecialQueryColumn, setSelectedSpecialQueryColumn] = useState("");
   const [selectedColumnValues, setSelectedColumnValues] = useState([]);
@@ -650,7 +663,6 @@ export const MapView = forwardRef(function MapView({ onVillaClick, colorByItem, 
         style={{ height: "100%", width: "100%" }}
         preferCanvas
         zoomAnimation={false}
-        scrollWheelZoom={false}
       >
         <VillaLayer
           geojson={geojson}
@@ -680,7 +692,16 @@ export const MapView = forwardRef(function MapView({ onVillaClick, colorByItem, 
         )}
         <FitToBounds geojson={geojson} />
         <MapPanControl />
+        <HideLabelsOnZoom onZoomStart={() => setLabelsEnabled(false)} />
       </MapContainer>
+
+      <button
+        type="button"
+        className={`map-labels-toggle ${labelsEnabled ? "is-active" : ""}`}
+        onClick={() => setLabelsEnabled((v) => !v)}
+      >
+        {labelsEnabled ? "🏷️ Hide Villa Numbers" : "🏷️ Show Villa Numbers"}
+      </button>
 
       <MapItemColorControl
         selectedItem={colorByItem}
@@ -717,8 +738,6 @@ export const MapView = forwardRef(function MapView({ onVillaClick, colorByItem, 
         onClearStatusHighlight={clearStatusHighlight}
         showBoundary={showBoundary}
         onShowBoundaryChange={setShowBoundary}
-        labelsEnabled={labelsEnabled}
-        onLabelsEnabledChange={setLabelsEnabled}
         customQueryConditions={customQueryConditions}
         onCustomQueryConditionsChange={setCustomQueryConditions}
         villaMetaByID={villaMetaByID}

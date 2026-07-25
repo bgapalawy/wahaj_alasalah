@@ -776,6 +776,31 @@ button, input, select {
   padding: var(--space-3);
 }
 
+.map-labels-toggle {
+  position: absolute;
+  top: var(--space-4);
+  right: var(--space-4);
+  z-index: 1000;
+  border: none;
+  border-radius: var(--radius-pill);
+  padding: 0.55rem 1rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  background: var(--color-surface);
+  color: var(--color-text);
+  box-shadow: var(--shadow-md);
+}
+
+.map-labels-toggle.is-active {
+  background: var(--color-primary);
+  color: white;
+}
+
+.map-labels-toggle:hover {
+  filter: brightness(0.97);
+}
+
 .map-item-color-header {
   display: flex;
   align-items: center;
