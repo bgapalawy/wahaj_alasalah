@@ -631,6 +631,7 @@ export const MapView = forwardRef(function MapView({ onVillaClick, colorByItem, 
         maxZoom={MAP_DEFAULTS.maxZoom}
         style={{ height: "100%", width: "100%" }}
         preferCanvas
+        zoomAnimation={false}
       >
         <VillaLayer
           geojson={geojson}
