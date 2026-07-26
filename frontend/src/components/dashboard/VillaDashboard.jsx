@@ -9,6 +9,8 @@ import {
   ArcElement,
   Tooltip,
   Legend,
+  LineController,
+  BarController
 } from "chart.js";
 import { Pie, Chart as MixedChart } from "react-chartjs-2";
 import * as XLSX from "xlsx";
@@ -22,7 +24,8 @@ import {
   getProjectDateRange,
 } from "../../utils/dashboardUtils.js";
 
-ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, ArcElement, Tooltip, Legend);
+ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, ArcElement, Tooltip, Legend,LineController,
+  BarController);
 
 const PIE_COLORS = ["#22c55e", "#e5e7eb"];
 
