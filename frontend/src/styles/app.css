@@ -1440,19 +1440,26 @@ button, input, select {
   }
 }
 
-.highlight-block-label span {
-  display: inline-block;
-  transform: translate(-50%, -50%);
-  background: rgba(234, 88, 12, 0.92);
-  color: white;
+.highlight-block-label-overlay {
+  /* Positioned in raw screen pixels (HighlightLabelsOverlay computes
+     left/top from the block's own bounds center every pan/zoom), not
+     through Leaflet's Marker/divIcon positioning. font-size AND
+     transform (translate + rotation to follow the block's own long
+     axis) are set inline per label, since both vary per instance. */
+  position: absolute;
+  color: #ea580c;
   font-family: var(--font-display);
   font-weight: 700;
-  font-size: 13px;
-  padding: 0.3rem 0.7rem;
-  border-radius: var(--radius-pill);
   white-space: nowrap;
-  box-shadow: var(--shadow-md);
+  /* No pill/box anymore — a light halo instead keeps the text legible
+     over the darker villa-status fill colors without a solid background
+     covering the parcel underneath. */
+  text-shadow:
+    0 0 2px rgba(255, 255, 255, 0.9),
+    0 0 2px rgba(255, 255, 255, 0.9),
+    0 0 4px rgba(255, 255, 255, 0.9);
   pointer-events: none;
+  z-index: 650;
 }
 
 .villa-label-tooltip {

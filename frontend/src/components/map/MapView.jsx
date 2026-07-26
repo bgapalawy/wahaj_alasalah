@@ -1,6 +1,6 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import L from "leaflet";
-import { MapContainer, Marker, useMap } from "react-leaflet";
+import { MapContainer, useMap } from "react-leaflet";
 import { VillaLayer } from "./VillaLayer.jsx";
 import { BoundaryLayer } from "./BoundaryLayer.jsx";
 import { MapPanControl } from "./MapPanControl.jsx";
@@ -15,6 +15,7 @@ import { useSpecialQueryData } from "../../hooks/useSpecialQueryData.js";
 import { renderPrintableMap } from "../../utils/renderPrintableMap.js";
 import { computeScheduleStatusFast } from "../../utils/scheduleUtils.js";
 import { evaluateCustomQuery } from "../../utils/customQueryUtils.js";
+import { computeEdgeOrientation } from "../../utils/blockOrientation.js";
 import { constructionItemsApi } from "../../api/constructionItems.js";
 import { ITEM_STATUS_ORDER } from "../../config/itemStatusColors.js";
 import { SCHEDULE_STATUS_ORDER, INVOICE_STATUS_ORDER, OUT_OF_SEQUENCE_ORDER } from "../../config/scheduleInvoiceColors.js";
@@ -52,6 +53,84 @@ function HideLabelsOnZoom({ onZoomStart }) {
     return () => map.off("zoomstart", onZoomStart);
   }, [map, onZoomStart]);
   return null;
+}
+
+// Highlighted block/zone label, positioned in screen pixels (like
+// MapPanControl) rather than as a Leaflet Marker/divIcon — needs the
+// block's on-screen pixel width every pan/zoom to size its own text, and
+// pixels are what that width naturally comes in.
+//
+// No pill/background anymore, and no decluttering that moves a label off
+// its own block — sized to fit within the block's own width instead, so
+// it sits right on its block without spilling into a neighbor, and reads
+// as plain bold text over the parcel fill (a thin light halo keeps it
+// legible over the darker villa colors without needing a solid box).
+function HighlightLabelsOverlay({ groups }) {
+  const map = useMap();
+  const [items, setItems] = useState([]);
+
+  useEffect(() => {
+    if (!map || groups.length === 0) {
+      setItems([]);
+      return;
+    }
+
+    const MIN_FONT_PX = 7;
+    const MAX_FONT_PX = 12;
+
+    function recompute() {
+      const next = groups.map((g) => {
+        const center = g.bounds.getCenter();
+        const labelPt = map.latLngToContainerPoint(g.labelLatLng);
+        const westPt = map.latLngToContainerPoint(L.latLng(center.lat, g.bounds.getWest()));
+        const eastPt = map.latLngToContainerPoint(L.latLng(center.lat, g.bounds.getEast()));
+        const blockWidthPx = Math.abs(eastPt.x - westPt.x);
+        // Solve for the font size whose estimated text width just fits
+        // 85% of the block's own width, so there's always a small
+        // margin before the label would reach a neighboring block.
+        const fontPx = Math.min(
+          Math.max((blockWidthPx * 0.85) / (g.label.length * 0.62), MIN_FONT_PX),
+          MAX_FONT_PX
+        );
+        return {
+          key: g.key,
+          label: g.label,
+          x: labelPt.x,
+          y: labelPt.y,
+          fontPx,
+          // CSS rotate() is clockwise-positive; computeEdgeOrientation
+          // returns jsPDF's convention (CCW-positive as viewed) so the
+          // PDF and the live map end up visually matching — negate it
+          // here to convert between the two.
+          rotationDeg: -(g.rotationDeg ?? 0),
+        };
+      });
+      setItems(next);
+    }
+
+    recompute();
+    map.on("move zoom", recompute);
+    return () => map.off("move zoom", recompute);
+  }, [map, groups]);
+
+  return (
+    <>
+      {items.map((it) => (
+        <div
+          key={it.key}
+          className="highlight-block-label-overlay"
+          style={{
+            left: it.x,
+            top: it.y,
+            fontSize: `${it.fontPx}px`,
+            transform: `translate(-50%, -50%) rotate(${it.rotationDeg}deg)`,
+          }}
+        >
+          {it.label}
+        </div>
+      ))}
+    </>
+  );
 }
 
 export const MapView = forwardRef(function MapView(
@@ -288,6 +367,26 @@ export const MapView = forwardRef(function MapView(
         statusCounts,
         filteredVillaIDs,
         highlightVillaIDs,
+        // Leaflet's LatLngBounds isn't meaningful outside a Leaflet map —
+        // the PDF exporter projects raw geo coordinates itself, so hand
+        // it plain numbers instead of the Leaflet instance used
+        // on-screen. lng/lat here is the EDGE anchor (near one end of
+        // the block's long axis, not its center — see labelLatLng
+        // above); westLng/eastLng stay at the bounds' own center
+        // latitude, since those are only used for the width-fit font
+        // sizing, not for where the label is drawn.
+        highlightGroupLabels: highlightGroupLabels.map((g) => {
+          const center = g.bounds.getCenter();
+          return {
+            label: g.label,
+            lng: g.labelLatLng.lng,
+            lat: g.labelLatLng.lat,
+            westLng: g.bounds.getWest(),
+            eastLng: g.bounds.getEast(),
+            widthSampleLat: center.lat,
+            rotationDeg: g.rotationDeg,
+          };
+        }),
         customQueryVillaIDs,
         customQueryColors: customQueryConditions.length > 0 ? getColors("customQuery") : null,
         titleText: options.printWindow ? "Site Map — Selected Area" : "Site Map — Villa Status",
@@ -580,24 +679,95 @@ export const MapView = forwardRef(function MapView(
     return set;
   }, [villaMetaByID, highlightBlocks, highlightZones]);
 
-  // Center point of whatever's currently highlighted, for the on-map
-  // "Block X" / "Zone X" label — the combined bounding box of every
-  // matching parcel, not an average of centroids (more representative of
-  // where the block/zone actually sits).
-  const highlightCenter = useMemo(() => {
-    if (!geojson || !highlightVillaIDs || highlightVillaIDs.size === 0) return null;
-    const matchingFeatures = (geojson.features ?? []).filter((f) => highlightVillaIDs.has(f.properties?.villaID));
-    if (matchingFeatures.length === 0) return null;
-    const bounds = L.geoJSON({ type: "FeatureCollection", features: matchingFeatures }).getBounds();
-    return bounds.isValid() ? bounds.getCenter() : null;
-  }, [geojson, highlightVillaIDs]);
+  // One label per highlighted group instead of a single combined label —
+  // when several blocks and/or zones are highlighted at once, each gets
+  // its own number shown right on its own location. Block and zone
+  // labels are independent of each other and both render when both are
+  // selected — a block label sits at that block's own center (scoped to
+  // the selected zones, if any), while a zone label sits at the whole
+  // zone's center regardless of which blocks within it are highlighted.
+  //
+  // `bounds` (not just a center point) is kept per group — both the
+  // live map and the PDF size each label's text to fit within its own
+  // block's width, so a label sits ON its block without bleeding into
+  // a neighboring one.
+  const highlightGroupLabels = useMemo(() => {
+    if (!geojson || !highlightVillaIDs || highlightVillaIDs.size === 0) return [];
 
-  const highlightLabelText = [
-    highlightBlocks.length > 0 && `Block ${highlightBlocks.join(", ")}`,
-    highlightZones.length > 0 && `Zone ${highlightZones.join(", ")}`,
-  ]
-    .filter(Boolean)
-    .join(" / ");
+    const featuresByVillaID = new Map(
+      (geojson.features ?? []).map((f) => [f.properties?.villaID, f])
+    );
+
+    const boundsFor = (villaIDs) => {
+      const matchingFeatures = villaIDs.map((id) => featuresByVillaID.get(id)).filter(Boolean);
+      if (matchingFeatures.length === 0) return null;
+      const bounds = L.geoJSON({ type: "FeatureCollection", features: matchingFeatures }).getBounds();
+      return bounds.isValid() ? bounds : null;
+    };
+
+    // Every ring vertex of every parcel in the group, in raw [lng, lat] —
+    // feeds computeEdgeOrientation so the label rotates to follow the
+    // block's own orientation (curved streets included) instead of
+    // always sitting perfectly horizontal regardless of how the block
+    // itself is laid out.
+    const ringPointsFor = (villaIDs) => {
+      const pts = [];
+      villaIDs.forEach((id) => {
+        const geom = featuresByVillaID.get(id)?.geometry;
+        if (!geom) return;
+        const polys = geom.type === "Polygon" ? [geom.coordinates] : geom.type === "MultiPolygon" ? geom.coordinates : [];
+        polys.forEach((rings) => {
+          const outer = rings[0];
+          if (outer) outer.forEach(([lng, lat]) => pts.push([lng, lat]));
+        });
+      });
+      return pts;
+    };
+
+    const blockGroups = highlightBlocks.map((block) => {
+      const matchingEntries = Object.entries(villaMetaByID).filter(
+        ([, meta]) =>
+          meta.blocknum === block &&
+          (highlightZones.length === 0 || highlightZones.includes(meta.zonenum))
+      );
+      // A block normally sits inside a single zone, but derive it from the
+      // matching villas themselves rather than assuming — if a block
+      // number happens to appear in more than one zone, show all of them
+      // instead of silently picking one.
+      const zonesForBlock = [...new Set(matchingEntries.map(([, meta]) => meta.zonenum))].filter(Boolean);
+      const label = zonesForBlock.length > 0
+        ? `Zone ${zonesForBlock.join(", ")} / Block ${block}`
+        : `Block ${block}`;
+      return {
+        key: `block-${block}`,
+        label,
+        villaIDs: matchingEntries.map(([villaID]) => villaID),
+      };
+    });
+
+    const zoneGroups = highlightZones.map((zone) => ({
+      key: `zone-${zone}`,
+      label: `Zone ${zone}`,
+      villaIDs: Object.entries(villaMetaByID)
+        .filter(([, meta]) => meta.zonenum === zone)
+        .map(([villaID]) => villaID),
+    }));
+
+    return [...blockGroups, ...zoneGroups]
+      .map((g) => {
+        const bounds = boundsFor(g.villaIDs);
+        if (!bounds) return null;
+        const center = bounds.getCenter();
+        const orientation = computeEdgeOrientation(ringPointsFor(g.villaIDs), center.lat);
+        // Positioned near one end of the block's own long axis (still
+        // rotated the same way) instead of the dead-center of the whole
+        // cluster — same idea as the villa numbers reading along a
+        // parcel, but anchored toward the block's edge per request.
+        const labelLatLng = L.latLng(center.lat + orientation.offsetLat, center.lng + orientation.offsetLng);
+        return { ...g, bounds, rotationDeg: orientation.angleDeg, labelLatLng };
+      })
+      .filter(Boolean);
+  }, [geojson, highlightVillaIDs, highlightBlocks, highlightZones, villaMetaByID]);
 
   // Counts against every real villa in the GeoJSON (villaMetaByID), not
   // just the ones the backend has data for — your DB currently only has
@@ -683,17 +853,7 @@ export const MapView = forwardRef(function MapView(
           onVillaClick={onVillaClick}
         />
         <BoundaryLayer geojson={boundaryGeojson} visible={showBoundary || forceAllLabels} />
-        {highlightCenter && highlightLabelText && (
-          <Marker
-            position={highlightCenter}
-            interactive={false}
-            icon={L.divIcon({
-              className: "highlight-block-label",
-              html: `<span>${highlightLabelText}</span>`,
-              iconSize: [0, 0],
-            })}
-          />
-        )}
+        <HighlightLabelsOverlay groups={highlightGroupLabels} />
         <FitToBounds geojson={geojson} />
         <MapPanControl />
         <HideLabelsOnZoom onZoomStart={() => onLabelsEnabledChange?.(false)} />

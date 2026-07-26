@@ -54,6 +54,7 @@ export async function buildVectorLayoutPdf({
   statusCounts = null,
   filteredVillaIDs,
   highlightVillaIDs,
+  highlightGroupLabels = [],
   customQueryVillaIDs = null,
   customQueryColors = null,
   titleText,
@@ -707,6 +708,78 @@ export async function buildVectorLayoutPdf({
     const ry = dx0 * Math.sin(rad) + dy0 * Math.cos(rad);
     doc.text(L.text, L.cx - rx, L.cy - ry, { angle: ang });
   });
+
+  // On-screen a highlighted block/zone gets a plain bold label sized to
+  // fit within its own block's width and rotated to follow the block's
+  // own long axis (MapView.jsx, highlightGroupLabels +
+  // HighlightLabelsOverlay / computeLongAxisAngle) — reproduced here so
+  // a highlighted selection survives into the printed sheet instead of
+  // only being visible live in the browser. Drawn in geo space via the
+  // same `project()` used for parcels, so it lands in the right spot
+  // and at the right size regardless of paper size/scale.
+  //
+  // No pill/background — just colored bold text at the block's own
+  // center, sized (via westLng/eastLng, the block's own bounding-box
+  // width) to fit within that block rather than a fixed size that can
+  // spill into a neighbor. A thin white halo (several offset white
+  // copies drawn under the colored text — jsPDF has no native text
+  // stroke/shadow) keeps it legible over the darker villa-status fills
+  // without needing a solid box.
+  if (highlightGroupLabels.length > 0) {
+    const labelColor = hexToRgb("#ea580c");
+    const MIN_FONT_MM = 1.1 * Kfont;
+    const MAX_FONT_MM = 2.0 * Kfont; // caps zone labels too — their own bounding box is far too wide to fit-to-width sensibly
+    const haloStep = 0.12 * K;
+    const haloOffsets = [[-1, -1], [1, -1], [-1, 1], [1, 1], [0, -1], [0, 1], [-1, 0], [1, 0]];
+
+    doc.setFont("helvetica", "bold");
+
+    highlightGroupLabels.forEach((g) => {
+      if (g.lng == null || g.lat == null) return;
+      const [cx, cy] = project([g.lng, g.lat]); // edge anchor, not the block's center
+
+      const widthSampleLat = g.widthSampleLat ?? g.lat;
+      let blockWidthMm = MAX_FONT_MM * 20; // no bounds given — fall back to the size cap only
+      if (g.westLng != null && g.eastLng != null) {
+        const [wx] = project([g.westLng, widthSampleLat]);
+        const [ex] = project([g.eastLng, widthSampleLat]);
+        blockWidthMm = Math.abs(ex - wx);
+      }
+      // Solve for the font size whose estimated text width just fits
+      // 85% of the block's own width, leaving a small margin before
+      // the label would reach a neighboring block.
+      const fontMm = Math.min(
+        Math.max((blockWidthMm * 0.85) / (g.label.length * 0.56), MIN_FONT_MM),
+        MAX_FONT_MM
+      );
+      doc.setFontSize(fontMm * PT_PER_MM);
+
+      const ang = g.rotationDeg ?? 0;
+      // Same fix as the villa-number labels above: jsPDF's
+      // align:"center" + angle combo has a real positional-drift bug,
+      // so center manually — compute the anchor offset (half text
+      // width, empirically-measured baseline-to-visual-center
+      // vertical offset), rotate THAT offset by the label's own
+      // angle, and hand jsPDF a pre-rotated anchor with default
+      // left-align/alphabetic-baseline (angle-only IS accurate).
+      const textW = doc.getTextWidth(g.label);
+      const dx0 = textW / 2;
+      const dy0 = -0.3815 * fontMm;
+      const rad = (-ang * Math.PI) / 180;
+      const rx = dx0 * Math.cos(rad) - dy0 * Math.sin(rad);
+      const ry = dx0 * Math.sin(rad) + dy0 * Math.cos(rad);
+
+      doc.setTextColor(255, 255, 255);
+      haloOffsets.forEach(([hdx, hdy]) => {
+        const tx = cx + hdx * haloStep;
+        const ty = cy + hdy * haloStep;
+        doc.text(g.label, tx - rx, ty - ry, { angle: ang });
+      });
+      doc.setTextColor(labelColor[0], labelColor[1], labelColor[2]);
+      doc.text(g.label, cx - rx, cy - ry, { angle: ang });
+    });
+    doc.setTextColor(inkText[0], inkText[1], inkText[2]);
+  }
 
   endMapClip();
 
