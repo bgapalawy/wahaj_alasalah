@@ -64,6 +64,10 @@ export function MapItemColorControl({
   onHighlightBlocksChange,
   highlightZones = [],
   onHighlightZonesChange,
+  highlightShowBorder = true,
+  onHighlightShowBorderChange,
+  highlightShowLabel = true,
+  onHighlightShowLabelChange,
   showBoundary,
   onShowBoundaryChange,
   customQueryConditions = [],
@@ -230,6 +234,27 @@ export function MapItemColorControl({
                     Clear
                   </button>
                 )}
+              </div>
+              {/* The border/outline and the text label are independent —
+                  some cases just want the label without the bold
+                  highlighted border, or vice versa. */}
+              <div className="map-highlight-display-toggles">
+                <label className="map-highlight-toggle">
+                  <input
+                    type="checkbox"
+                    checked={highlightShowBorder}
+                    onChange={(e) => onHighlightShowBorderChange?.(e.target.checked)}
+                  />
+                  Show highlighting
+                </label>
+                <label className="map-highlight-toggle">
+                  <input
+                    type="checkbox"
+                    checked={highlightShowLabel}
+                    onChange={(e) => onHighlightShowLabelChange?.(e.target.checked)}
+                  />
+                  Show label
+                </label>
               </div>
             </details>
           )}

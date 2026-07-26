@@ -148,6 +148,12 @@ export const MapView = forwardRef(function MapView(
   const [customQueryConditions, setCustomQueryConditions] = useState([]);
   const [highlightBlocks, setHighlightBlocks] = useState([]);
   const [highlightZones, setHighlightZones] = useState([]);
+  // Highlighting has two independent visual pieces — the bright
+  // outline/bold border drawn on matching villas, and the block/zone
+  // text label overlay — so either can be shown on its own (e.g. label
+  // only, no border) instead of always toggling together.
+  const [highlightShowBorder, setHighlightShowBorder] = useState(true);
+  const [highlightShowLabel, setHighlightShowLabel] = useState(true);
   const [showBoundary, setShowBoundary] = useState(false);
   const [colorMode, setColorMode] = useState("status"); // status | schedule | invoice | column
   const [selectedSpecialQueryColumn, setSelectedSpecialQueryColumn] = useState("");
@@ -340,7 +346,7 @@ export const MapView = forwardRef(function MapView(
         colorPalette: activeColors,
         statusOrder: activeOrder,
         filteredVillaIDs,
-        highlightVillaIDs,
+        highlightVillaIDs: highlightShowBorder ? highlightVillaIDs : null,
         customQueryVillaIDs,
         customQueryColors: customQueryConditions.length > 0 ? getColors("customQuery") : null,
         titleText: "Sahms ElGhroub — Site Map",
@@ -366,7 +372,7 @@ export const MapView = forwardRef(function MapView(
         statusOrder: activeOrder,
         statusCounts,
         filteredVillaIDs,
-        highlightVillaIDs,
+        highlightVillaIDs: highlightShowBorder ? highlightVillaIDs : null,
         // Leaflet's LatLngBounds isn't meaningful outside a Leaflet map —
         // the PDF exporter projects raw geo coordinates itself, so hand
         // it plain numbers instead of the Leaflet instance used
@@ -375,7 +381,7 @@ export const MapView = forwardRef(function MapView(
         // above); westLng/eastLng stay at the bounds' own center
         // latitude, since those are only used for the width-fit font
         // sizing, not for where the label is drawn.
-        highlightGroupLabels: highlightGroupLabels.map((g) => {
+        highlightGroupLabels: (highlightShowLabel ? highlightGroupLabels : []).map((g) => {
           const center = g.bounds.getCenter();
           return {
             label: g.label,
@@ -843,7 +849,7 @@ export const MapView = forwardRef(function MapView(
           itemStatusLookup={itemStatusLookup}
           colorPalette={activeColors}
           filteredVillaIDs={filteredVillaIDs}
-          highlightVillaIDs={highlightVillaIDs}
+          highlightVillaIDs={highlightShowBorder ? highlightVillaIDs : null}
           statusHighlight={statusHighlight}
           customQueryVillaIDs={customQueryVillaIDs}
           customQueryColors={customQueryConditions.length > 0 ? getColors("customQuery") : null}
@@ -853,7 +859,7 @@ export const MapView = forwardRef(function MapView(
           onVillaClick={onVillaClick}
         />
         <BoundaryLayer geojson={boundaryGeojson} visible={showBoundary || forceAllLabels} />
-        <HighlightLabelsOverlay groups={highlightGroupLabels} />
+        <HighlightLabelsOverlay groups={highlightShowLabel ? highlightGroupLabels : []} />
         <FitToBounds geojson={geojson} />
         <MapPanControl />
         <HideLabelsOnZoom onZoomStart={() => onLabelsEnabledChange?.(false)} />
@@ -899,6 +905,10 @@ export const MapView = forwardRef(function MapView(
         onHighlightBlocksChange={setHighlightBlocks}
         highlightZones={highlightZones}
         onHighlightZonesChange={setHighlightZones}
+        highlightShowBorder={highlightShowBorder}
+        onHighlightShowBorderChange={setHighlightShowBorder}
+        highlightShowLabel={highlightShowLabel}
+        onHighlightShowLabelChange={setHighlightShowLabel}
         statusHighlight={statusHighlight}
         onToggleStatusHighlight={toggleStatusHighlight}
         onClearStatusHighlight={clearStatusHighlight}
