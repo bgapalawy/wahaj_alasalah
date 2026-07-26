@@ -424,6 +424,36 @@ export async function buildVectorLayoutPdf({
     return a;
   }
 
+  // Local width at a POINT, along a given direction — cast a ray both
+  // ways from (px, py) and find where it exits the ring. This is the
+  // fix for tapered/skewed parcels (curve-transition wedges, cul-de-sac
+  // corners): spanAlong/spanAcross above measure room across the WHOLE
+  // polygon via its bounding rectangle, which is exact for a rectangle
+  // but can overstate the room actually available right at the
+  // parcel's own centroid — where the label is drawn — for a
+  // non-rectangular shape (e.g. a parallelogram-like wedge that's wide
+  // at one end and narrow at the other: the bounding-rect "across"
+  // reflects the wide end, but the centroid can sit on the narrow
+  // side). A label sized off that overstated width pokes out through
+  // the near edge. This measures the real local cross-section instead.
+  function rayWidthAt(ring, px, py, dirX, dirY) {
+    let tPos = Infinity, tNeg = -Infinity;
+    for (let i = 0; i < ring.length; i++) {
+      const [ax, ay] = ring[i];
+      const [bx, by] = ring[(i + 1) % ring.length];
+      const ex = bx - ax, ey = by - ay;
+      const denom = dirX * (-ey) - dirY * (-ex);
+      if (Math.abs(denom) < 1e-9) continue; // parallel to this edge
+      const t = ((ax - px) * (-ey) - (ay - py) * (-ex)) / denom;
+      const u = (dirX * (ay - py) - dirY * (ax - px)) / denom;
+      if (u < 0 || u > 1) continue; // outside the segment
+      if (t >= 0 && t < tPos) tPos = t;
+      if (t <= 0 && t > tNeg) tNeg = t;
+    }
+    if (!isFinite(tPos) || !isFinite(tNeg)) return Infinity; // no exit found, don't constrain
+    return tPos - tNeg;
+  }
+
   doc.setFont("helvetica", "bold");
   const inkText = [17, 24, 39];
 
@@ -457,20 +487,47 @@ export async function buildVectorLayoutPdf({
   // the real per-type geometry: MIN_LEGIBLE_MM 0.7 + a 0.95 across
   // margin (using nearly the full parcel width instead of leaving 35%
   // spare) clears every type at both 1:4,000 and 1:7,500.
-  const MIN_LEGIBLE_MM = 0.7;  // ~2 pt — fine on a zoomable vector PDF
-  // MAX_LABEL_MM is an ABSOLUTE ceiling, independent of scale — this is
-  // what was still producing "text so big" at closer scales like
-  // 1:3,000: with plenty of room per parcel, the sheet-wide median
-  // target climbed to ~3.1mm (right up against the old 3.2 cap), which
-  // reads as oversized even though every label is now the same size.
-  // Lowered so a run at any scale — 1:3,000, 1:4,000, 1:7,500 — tops
-  // out at a size that's comfortably legible without dominating the
-  // parcel. Re-checked against real geometry: still 0% culled
-  // everywhere from 1:3,000 through 1:7,500 at this cap.
-  const MAX_LABEL_MM = 1.3;    // sheet-wide target is capped here too
+  // Font sizing gets its OWN linear scale factor — separate from K
+  // above. K uses sqrt easing on purpose for marginalia (margins,
+  // legend, scale bar, north arrow) so those stay readable even on
+  // small sheets. But the real room inside each parcel (fitAlong /
+  // fitAcross below) shrinks close to LINEARLY with paper size, since
+  // it comes straight from projected geometry. Using the sqrt-eased K
+  // for the label floor/ceiling made the ceiling shrink slower (71% at
+  // A3) than the parcels actually did (~50% at A3), so labels kept
+  // landing near a ceiling that was still oversized relative to the
+  // smaller parcels — the "A3 shows labels now but they're still too
+  // big" report. Kfont tracks the real shrink instead.
+  const Kfont = PAGE_W / 841;
+  // Scaled by Kfont so the floor/ceiling shrink in step with how much
+  // smaller the parcels themselves actually got on this paper size.
+  // These two used to be fixed in absolute mm regardless of paper
+  // size, which is why A3 first differed from A1: at A3 the whole
+  // frame — and every parcel in it — is physically ~50% smaller, but
+  // labels were being floored/capped against A1-sized numbers. That
+  // produced both halves of the original "A3 printing" report at
+  // once: labels that DID render looked oversized relative to their
+  // now-smaller parcels (fixed 1.3mm ceiling), and narrower parcels
+  // (A-MID terraces especially) couldn't clear a fixed 0.7mm floor
+  // once everything shrank, so they got culled instead of drawn.
+  const MIN_LEGIBLE_MM = 0.7 * Kfont;  // ~2 pt at A1 — fine on a zoomable vector PDF
+  // MAX_LABEL_MM is an ABSOLUTE ceiling with respect to PLOT scale
+  // (1:3,000 vs 1:7,500 etc.) — this is what was still producing
+  // "text so big" at closer plot scales like 1:3,000: with plenty of
+  // room per parcel, the sheet-wide median target climbed to ~3.1mm
+  // (right up against the old 3.2 cap), which reads as oversized even
+  // though every label is now the same size. Lowered so a run at any
+  // plot scale — 1:3,000, 1:4,000, 1:7,500 — tops out at a size that's
+  // comfortably legible without dominating the parcel. Re-checked
+  // against real geometry: still 0% culled everywhere from 1:3,000
+  // through 1:7,500 at this cap. It IS, however, scaled by Kfont
+  // (linear paper-size factor) — see the note above MIN_LEGIBLE_MM.
+  const MAX_LABEL_MM = 1.3 * Kfont;  // sheet-wide target is capped here too, scaled per-paper like MIN_LEGIBLE_MM above
   const PT_PER_MM = 72 / 25.4;
 
-  const measured = labels.map((L) => {
+  // Pass 1: initial angle per label (CAD angle if trustworthy, else the
+  // parcel's own long-axis fit).
+  const angled = labels.map((L) => {
     const rect = minBoundingRect(L.ring);
     const axis = uprightAngle(rect ? rect.angleDeg : longAxisAngle(L.ring));
     let ang;
@@ -482,14 +539,126 @@ export async function buildVectorLayoutPdf({
     } else {
       ang = axis;
     }
+    return { L, ang };
+  });
+
+  // Pass 1b: neighbor-consistency correction. uprightAngle folds every
+  // axis into a fixed (-90, 90] band, which has a real discontinuity at
+  // the ±90° seam: two parcels whose TRUE long-axis angle differs by
+  // only a couple of degrees (e.g. 89° vs 91°) can land on opposite
+  // sides of that seam (89° vs -89°) and come out ~180° apart even
+  // though they're nearly the same line. Rotating text by ang vs
+  // ang+180 keeps the same baseline but reverses which way it reads —
+  // that's the "villa 44/45 need to be mirrored" report: they're the
+  // near-vertical end-of-row parcels sitting right at that seam, so a
+  // tiny wobble flips them relative to their neighbors even though
+  // 28-43 (comfortably clear of ±90°) stay consistent with each other.
+  //
+  // A first version fixed each label by comparing it to whichever
+  // OTHER label happened to be nearest, independently per label. That
+  // cascades: 44 got corrected fine, but 45 and 46 each compared
+  // against a neighbor that might not have been corrected yet (or
+  // wasn't itself the right reference), so the fix propagated in the
+  // wrong direction and broke labels that were already fine. The
+  // correct version of this is a flood-fill: build a minimum spanning
+  // tree over every label's centroid, then walk the tree from one root
+  // so each label is corrected against a PARENT that has already been
+  // settled — never against an as-yet-unvisited or already-wrong peer.
+  // This is the standard technique for propagating a consistent
+  // orientation across a mesh (the same idea as phase unwrapping).
+  if (angled.length > 1) {
+    const n = angled.length;
+    const inTree = new Array(n).fill(false);
+    const parent = new Array(n).fill(-1);
+    const minDist = new Array(n).fill(Infinity);
+    minDist[0] = 0;
+    const children = Array.from({ length: n }, () => []);
+    for (let count = 0; count < n; count++) {
+      let u = -1, best = Infinity;
+      for (let v = 0; v < n; v++) {
+        if (!inTree[v] && minDist[v] < best) { best = minDist[v]; u = v; }
+      }
+      if (u === -1) break;
+      inTree[u] = true;
+      if (parent[u] !== -1) children[parent[u]].push(u);
+      const pu = angled[u].L;
+      for (let v = 0; v < n; v++) {
+        if (inTree[v]) continue;
+        const pv = angled[v].L;
+        const d = (pv.cx - pu.cx) ** 2 + (pv.cy - pu.cy) ** 2;
+        if (d < minDist[v]) { minDist[v] = d; parent[v] = u; }
+      }
+    }
+    // Walk the tree from the root (index 0): each node is only visited
+    // after its parent, so `angled[parent[u]].ang` is always already
+    // settled by the time we use it to correct `angled[u].ang`.
+    // Track original angles so we can sanity-check the result below —
+    // this propagation only enforces RELATIVE consistency across the
+    // tree, it has no absolute reference for which direction is
+    // "correct". If the arbitrary root (index 0) happened to be one of
+    // the small number of originally-wrong labels, the whole tree
+    // would faithfully propagate ITS wrong direction to everyone else
+    // — flipping the ~99% that were already fine instead of fixing the
+    // ~1% that weren't (exactly what happened: "all villas need to be
+    // mirrored" after the previous version, because labels[0] was
+    // apparently one of the boundary-crossing ones).
+    const originalAng = angled.map((a) => a.ang);
+    const stack = [0];
+    const visited = new Array(n).fill(false);
+    visited[0] = true;
+    while (stack.length) {
+      const u = stack.pop();
+      const p = parent[u];
+      if (p !== -1) {
+        let diff = angled[u].ang - angled[p].ang;
+        diff = ((diff + 180) % 360 + 360) % 360 - 180; // normalize to (-180, 180]
+        if (Math.abs(diff) > 90) angled[u].ang += diff > 0 ? -180 : 180;
+      }
+      for (const c of children[u]) {
+        if (!visited[c]) { visited[c] = true; stack.push(c); }
+      }
+    }
+    // Majority-vote anchor: count how many labels actually got flipped
+    // from their original angle. The true bug only ever affects a small
+    // minority (the parcels sitting right at the ±90° fold boundary);
+    // if propagation flipped MORE than half the sheet, that means the
+    // whole tree converged on the wrong branch relative to the
+    // already-correct majority, so undo it in one shot — flip every
+    // label back. Net effect either way: only the genuine minority ends
+    // up different from where it started.
+    let flippedCount = 0;
+    for (let i = 0; i < n; i++) {
+      let d = angled[i].ang - originalAng[i];
+      d = ((d + 180) % 360 + 360) % 360 - 180;
+      if (Math.abs(d) > 90) flippedCount++;
+    }
+    if (flippedCount > n / 2) {
+      for (let i = 0; i < n; i++) angled[i].ang += 180;
+    }
+  }
+
+  // Pass 2: fit metrics using the (now neighbor-consistent) angle.
+  const measured = angled.map(({ L, ang }) => {
     const along = spanAlong(L.ring, ang);
     const across = spanAlong(L.ring, ang + 90);
+    // Local cross-section through the label's OWN centroid, in the
+    // same along/across directions. For a rectangle this matches
+    // `along`/`across` almost exactly (cheap to check, no downside);
+    // for a tapered/skewed parcel it's the real, possibly-narrower,
+    // room right where the label actually sits.
+    const angRad = (ang * Math.PI) / 180;
+    const alongDx = Math.cos(angRad), alongDy = -Math.sin(angRad);
+    const acrossDx = -alongDy, acrossDy = alongDx;
+    const localAlong = rayWidthAt(L.ring, L.cx, L.cy, alongDx, alongDy);
+    const localAcross = rayWidthAt(L.ring, L.cx, L.cy, acrossDx, acrossDy);
+    const safeAlong = Math.min(along, localAlong);
+    const safeAcross = Math.min(across, localAcross);
     // Hard fit inside the parcel: Helvetica-bold digits are ~0.56 em
     // wide; keep breathing room on the long axis. STRICT: a label may
     // never exceed its own parcel's room, so neighboring labels can
     // never overlap (parcels don't overlap).
-    const fitAlong = (along * 0.85) / (L.text.length * 0.56);
-    const fitAcross = across * 0.75;
+    const fitAlong = (safeAlong * 0.85) / (L.text.length * 0.56);
+    const fitAcross = safeAcross * 0.75;
     const fitSize = L.cadHeightM ? (L.cadHeightM * 1000) / scaleDen : Math.min(fitAlong, fitAcross, MAX_LABEL_MM);
     return { L, ang, fitAlong, fitAcross, fitSize };
   });
@@ -510,7 +679,33 @@ export async function buildVectorLayoutPdf({
 
     doc.setFontSize(fontMm * PT_PER_MM);
     doc.setTextColor(inkText[0], inkText[1], inkText[2]);
-    doc.text(L.text, L.cx, L.cy, { align: "center", baseline: "middle", angle: ang });
+    // NOT doc.text(..., { align: "center", baseline: "middle", angle: ang })
+    // — jsPDF has a real bug there: it computes the center/middle offset
+    // (half text width, half cap height) in PAGE space and only THEN
+    // applies the rotation matrix, instead of rotating that offset
+    // together with the glyph. The result is a real positional drift
+    // that grows with the rotation angle (measured up to ~5pt / 1.8mm
+    // at angles near 150-180°, confirmed by rendering test cases and
+    // reading jsPDF's own source around the `align === "center"` branch
+    // of its text-placement code) — exactly the "villa text not in its
+    // position" symptom: centroid math was correct, but the drawn
+    // glyph visibly drifted off it, enough to spill outside small
+    // parcels even though there was room on paper.
+    //
+    // Fix: compute our own centering offset (half text width, and a
+    // fixed -0.3815 * fontSize vertical offset — the empirically
+    // measured, fontSize-independent ratio from baseline-left anchor
+    // to a Helvetica-Bold digit's visual center), rotate THAT offset
+    // by the label's own angle ourselves, and hand jsPDF a pre-rotated
+    // anchor point with the default left-align / alphabetic-baseline
+    // (angle-only, no jsPDF-side offset math, which IS accurate).
+    const textW = doc.getTextWidth(L.text);
+    const dx0 = textW / 2;
+    const dy0 = -0.3815 * fontMm; // both dx0 and dy0 must be in doc units (mm), matching L.cx/L.cy — NOT the point-converted font size
+    const rad = (-ang * Math.PI) / 180;
+    const rx = dx0 * Math.cos(rad) - dy0 * Math.sin(rad);
+    const ry = dx0 * Math.sin(rad) + dy0 * Math.cos(rad);
+    doc.text(L.text, L.cx - rx, L.cy - ry, { angle: ang });
   });
 
   endMapClip();
