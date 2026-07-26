@@ -9,6 +9,8 @@ import {
   ArcElement,
   Tooltip,
   Legend,
+  LineController,
+  BarController
 } from "chart.js";
 import { Pie, Bar, Chart as MixedChart } from "react-chartjs-2";
 import * as XLSX from "xlsx";
@@ -106,7 +108,9 @@ import { Tabs } from "./Tabs.jsx";
 import { ConstructionItemDashboard } from "./ConstructionItemDashboard.jsx";
 import { useVillaGeoMeta } from "../../hooks/useVillaGeoMeta.js";
 
-ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, ArcElement, Tooltip, Legend);
+ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, ArcElement, Tooltip, Legend,
+  LineController,
+  BarController);
 
 const PAGE_SIZE = 25;
 const STATUS_ORDER = ["NotStarted", "InProgress", "Completed"];
