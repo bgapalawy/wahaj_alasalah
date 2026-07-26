@@ -509,6 +509,41 @@ export const MapView = forwardRef(function MapView(
     return map;
   }, [geojson]);
 
+  // Zone/Block/Villa Type already live on villaMetaByID (from the
+  // GeoJSON — same source as the Zone/Block filters above). Merged in
+  // here as virtual "special query" columns so they're colorable via
+  // the Column dropdown too, with no import into
+  // villa_special_query_values required.
+  const VILLA_META_SPECIAL_COLUMNS = [
+    { label: "Zone", field: "zonenum" },
+    { label: "Block", field: "blocknum" },
+    { label: "Villa Type", field: "villatype" },
+  ];
+
+  const mergedSpecialQueryColumns = useMemo(() => {
+    const metaLabels = VILLA_META_SPECIAL_COLUMNS.map((c) => c.label);
+    return [...metaLabels, ...specialQueryColumns.filter((c) => !metaLabels.includes(c))].sort();
+  }, [specialQueryColumns]);
+
+  const mergedSpecialQueryValuesByColumn = useMemo(() => {
+    const result = { ...specialQueryValuesByColumn };
+    VILLA_META_SPECIAL_COLUMNS.forEach(({ label, field }) => {
+      result[label] = [...new Set(Object.values(villaMetaByID).map((m) => m[field]))].filter(Boolean).sort();
+    });
+    return result;
+  }, [specialQueryValuesByColumn, villaMetaByID]);
+
+  const mergedSpecialQueryByVilla = useMemo(() => {
+    const result = {};
+    Object.keys(villaMetaByID).forEach((villaID) => {
+      result[villaID] = { ...(specialQueryByVilla[villaID] ?? {}) };
+      VILLA_META_SPECIAL_COLUMNS.forEach(({ label, field }) => {
+        result[villaID][label] = villaMetaByID[villaID]?.[field] ?? null;
+      });
+    });
+    return result;
+  }, [specialQueryByVilla, villaMetaByID]);
+
   // Column mode: color every villa by its value for a chosen
   // special-query column instead of a fixed status set. Reuses the SAME
   // itemStatusLookup/colorPalette mechanism VillaLayer already has for
@@ -518,16 +553,26 @@ export const MapView = forwardRef(function MapView(
     if (colorMode !== "column" || !selectedSpecialQueryColumn) return null;
     const lookup = {};
     Object.keys(villaMetaByID).forEach((villaID) => {
-      const value = specialQueryByVilla[villaID]?.[selectedSpecialQueryColumn];
+      const value = mergedSpecialQueryByVilla[villaID]?.[selectedSpecialQueryColumn];
       lookup[villaID] = value !== undefined && value !== null && value !== "" ? String(value) : "(no value)";
     });
     return lookup;
-  }, [colorMode, selectedSpecialQueryColumn, specialQueryByVilla, villaMetaByID]);
+  }, [colorMode, selectedSpecialQueryColumn, mergedSpecialQueryByVilla, villaMetaByID]);
 
   const distinctColumnValues = useMemo(() => {
     if (!selectedSpecialQueryColumn) return [];
-    return [...new Set([...(specialQueryValuesByColumn[selectedSpecialQueryColumn] ?? []).map(String), "(no value)"])];
-  }, [selectedSpecialQueryColumn, specialQueryValuesByColumn]);
+    const knownValues = (mergedSpecialQueryValuesByColumn[selectedSpecialQueryColumn] ?? []).map(String);
+    // Only show "(no value)" as its own bucket when at least one real
+    // villa is actually missing this column — for a fully-populated
+    // column (e.g. Zone/Block/Villa Type, or a completely-filled-in
+    // Special Query column) that bucket would always be empty, so
+    // there's no reason to show it.
+    const hasMissingValue = Object.keys(villaMetaByID).some((villaID) => {
+      const value = mergedSpecialQueryByVilla[villaID]?.[selectedSpecialQueryColumn];
+      return value === undefined || value === null || value === "";
+    });
+    return hasMissingValue ? [...new Set([...knownValues, "(no value)"])] : [...new Set(knownValues)];
+  }, [selectedSpecialQueryColumn, mergedSpecialQueryValuesByColumn, mergedSpecialQueryByVilla, villaMetaByID]);
 
   // Every value selected by default the moment a column is picked —
   // "see everything, then narrow down" rather than starting from
@@ -585,9 +630,9 @@ export const MapView = forwardRef(function MapView(
       villaMetaByID,
       allVillaStatuses,
       allVillaInvoiceStatuses,
-      specialQueryByVilla,
+      specialQueryByVilla: mergedSpecialQueryByVilla,
     });
-  }, [customQueryConditions, allVillaStatuses, allVillaInvoiceStatuses, villaMetaByID, specialQueryByVilla]);
+  }, [customQueryConditions, allVillaStatuses, allVillaInvoiceStatuses, villaMetaByID, mergedSpecialQueryByVilla]);
 
   // Hierarchy: Zone > Block > Villa Type > Villa. Each level narrows the
   // options for the next.
@@ -917,8 +962,8 @@ export const MapView = forwardRef(function MapView(
         customQueryConditions={customQueryConditions}
         onCustomQueryConditionsChange={setCustomQueryConditions}
         villaMetaByID={villaMetaByID}
-        specialQueryColumns={specialQueryColumns}
-        specialQueryValuesByColumn={specialQueryValuesByColumn}
+        specialQueryColumns={mergedSpecialQueryColumns}
+        specialQueryValuesByColumn={mergedSpecialQueryValuesByColumn}
         customQueryColors={getColors("customQuery")}
         selectedSpecialQueryColumn={selectedSpecialQueryColumn}
         onSelectedSpecialQueryColumnChange={setSelectedSpecialQueryColumn}
