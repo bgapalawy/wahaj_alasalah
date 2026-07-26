@@ -149,14 +149,24 @@ export async function exportTableData(tableName) {
   const target = IMPORT_TARGETS[tableName];
 
   const dateFormatted = target.kind === "date" ? `to_char(${target.column}, 'YYYY-MM-DD')` : target.column;
-  const { rows } = target.isEAV
-    ? await query(`SELECT villa_id, column_name AS item, value AS val FROM villa_special_query_values WHERE value IS NOT NULL`)
-    : await query(
-        `SELECT villa_id, table_item_id AS item, ${dateFormatted} AS val
-         FROM villa_item_status WHERE ${target.column} IS NOT NULL`
-      );
+  const [{ rows: villaRows }, { rows }] = await Promise.all([
+    query(`SELECT villa_id FROM villas`),
+    target.isEAV
+      ? query(`SELECT villa_id, column_name AS item, value AS val FROM villa_special_query_values WHERE value IS NOT NULL`)
+      : query(
+          `SELECT villa_id, table_item_id AS item, ${dateFormatted} AS val
+           FROM villa_item_status WHERE ${target.column} IS NOT NULL`
+        ),
+  ]);
 
   const byVilla = {};
+  // Seed every real villa first — even one with zero rows in the target
+  // table still gets included (its Zone/Block/Villa Type reference
+  // columns, added client-side, need a row to attach to; every item
+  // column is simply left blank for it).
+  for (const v of villaRows) {
+    byVilla[v.villa_id] = { villaID: v.villa_id };
+  }
   for (const r of rows) {
     byVilla[r.villa_id] ??= { villaID: r.villa_id };
     byVilla[r.villa_id][r.item] = r.val;
