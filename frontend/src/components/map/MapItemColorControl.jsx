@@ -166,8 +166,7 @@ export function MapItemColorControl({
                   Filters
                   {(() => {
                     const activeCount =
-                      selectedZones.length + selectedBlocks.length + selectedVillaTypes.length + selectedVillas.length +
-                      highlightZones.length + highlightBlocks.length;
+                      selectedZones.length + selectedBlocks.length + selectedVillaTypes.length + selectedVillas.length;
                     return activeCount > 0 ? ` (${activeCount} active)` : "";
                   })()}
                 </summary>
@@ -192,37 +191,48 @@ export function MapItemColorControl({
                     <MultiSelect label="Villa" options={villaOptions} value={selectedVillas} onChange={onVillasChange} />
                   )}
                 </div>
-
-                {(blockOptions.length > 0 || zoneOptions.length > 0) && (
-                  <div className="map-highlight-row">
-                    <span className="map-highlight-label">Highlight:</span>
-                    {zoneOptions.length > 0 && (
-                      <MultiSelect label="Zone" options={zoneOptions} value={highlightZones} onChange={onHighlightZonesChange} />
-                    )}
-                    {highlightBlockOptions.length > 0 && (
-                      <MultiSelect
-                        label="Block"
-                        options={highlightBlockOptions}
-                        value={highlightBlocks}
-                        onChange={onHighlightBlocksChange}
-                      />
-                    )}
-                    {(highlightBlocks.length > 0 || highlightZones.length > 0) && (
-                      <button
-                        type="button"
-                        className="map-item-color-clear"
-                        onClick={() => {
-                          onHighlightBlocksChange([]);
-                          onHighlightZonesChange([]);
-                        }}
-                      >
-                        Clear
-                      </button>
-                    )}
-                  </div>
-                )}
               </details>
             )}
+
+          {/* Independent of item selection on purpose — this is a visual
+              spotlight (bright outline on a zone/block), not tied to any
+              construction item's data, so it shouldn't require picking
+              one first. */}
+          {(blockOptions.length > 0 || zoneOptions.length > 0) && (
+            <details className="filters-section">
+              <summary>
+                Highlight
+                {highlightZones.length + highlightBlocks.length > 0
+                  ? ` (${highlightZones.length + highlightBlocks.length} active)`
+                  : ""}
+              </summary>
+              <div className="map-highlight-row">
+                {zoneOptions.length > 0 && (
+                  <MultiSelect label="Zone" options={zoneOptions} value={highlightZones} onChange={onHighlightZonesChange} />
+                )}
+                {highlightBlockOptions.length > 0 && (
+                  <MultiSelect
+                    label="Block"
+                    options={highlightBlockOptions}
+                    value={highlightBlocks}
+                    onChange={onHighlightBlocksChange}
+                  />
+                )}
+                {(highlightBlocks.length > 0 || highlightZones.length > 0) && (
+                  <button
+                    type="button"
+                    className="map-item-color-clear"
+                    onClick={() => {
+                      onHighlightBlocksChange([]);
+                      onHighlightZonesChange([]);
+                    }}
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+            </details>
+          )}
 
           <details className="custom-query-section">
             <summary>
