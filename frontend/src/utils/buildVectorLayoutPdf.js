@@ -1,4 +1,6 @@
 import { ITEM_STATUS_COLORS, ITEM_STATUS_ORDER } from "../config/itemStatusColors.js";
+import { NOTO_SANS_ARABIC_REGULAR_BASE64 } from "./notoSansArabicFont.js";
+import { shapeArabicForPdf } from "./arabicShaper.js";
 
 /**
  * TRUE-VECTOR A1 layout sheet — the AutoCAD/ArcGIS "plot to PDF" answer.
@@ -59,6 +61,8 @@ export async function buildVectorLayoutPdf({
   customQueryColors = null,
   titleText,
   subtitleText,
+  filterSummaryLines = [],
+  itemNameArabic = null,
   projectName = "SHAMS EL GHROUB",
   logos = [],
   drawingNumber = "SITE-001",
@@ -80,6 +84,13 @@ export async function buildVectorLayoutPdf({
   const K = Math.sqrt(PAGE_W / 841);
   const { jsPDF } = await import("jspdf");
   const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: [PAGE_W, PAGE_H], compress: true });
+
+  // Embed the Arabic-capable font once up front — needed to draw
+  // itemNameArabic (the selected construction item's nameArabic) in the
+  // title block below. jsPDF's default fonts (Helvetica etc.) have no
+  // Arabic glyphs at all, so without this the text would silently vanish.
+  doc.addFileToVFS("NotoSansArabic-Regular.ttf", NOTO_SANS_ARABIC_REGULAR_BASE64);
+  doc.addFont("NotoSansArabic-Regular.ttf", "NotoSansArabic", "normal");
 
   /* ----------------------------------------------------------------
    * 1. Geographic extent
@@ -941,6 +952,16 @@ export async function buildVectorLayoutPdf({
     doc.setTextColor(68, 68, 68);
     doc.text(subtitleText, colX[1] + cellPad, tbY + tbH * 0.72);
   }
+  // Arabic name of the selected construction item (construction_items
+  // .name_arabic), shaped + reversed via shapeArabicForPdf so jsPDF's
+  // dumb per-codepoint cmap lookup renders it correctly joined and
+  // right-to-left instead of as disconnected isolated letters.
+  if (itemNameArabic) {
+    doc.setFont("NotoSansArabic", "normal");
+    doc.setFontSize(8.5 * K);
+    doc.setTextColor(68, 68, 68);
+    doc.text(shapeArabicForPdf(itemNameArabic), colX[1] + cellPad, tbY + tbH * 0.9, { align: "left" });
+  }
 
   // Cell 3 — drawn / checked / date
   {
@@ -1099,6 +1120,12 @@ export async function buildVectorLayoutPdf({
     doc.text("villas", cx, cy + 2.6 * K, { align: "center" });
   }
 
+  // Tracks where the legend box (if drawn at all) actually ends, so the
+  // Active Filters box below stacks under it instead of overlapping —
+  // stays at its default (just inside the frame corner) when no legend
+  // is drawn this run.
+  let afterLegendY = frameY + 7 * K;
+
   const legendEntries = (customQueryVillaIDs && customQueryColors)
     ? [
         { status: "Matches query", color: hexToRgb(customQueryColors.match), count: customQueryVillaIDs.size },
@@ -1166,6 +1193,44 @@ export async function buildVectorLayoutPdf({
         doc.setFont("helvetica", "bold");
         doc.text(e.count.toLocaleString(), rowsX + rowsW - lgPad, ry + swatch / 2 + 1.1 * K, { align: "right" });
       }
+    });
+
+    afterLegendY = lgY + lgH;
+  }
+
+  /* ----------------------------------------------------------------
+   * 12. Active Filters — every currently-applied Zone/Block/Villa
+   * Type/Villa filter plus every custom-query condition, in the same
+   * readable phrasing CustomQueryBuilder uses on screen (see
+   * describeCustomQueryConditions in customQueryUtils.js). Drawn the
+   * same boxed style as the Legend, stacked directly beneath it.
+   * ---------------------------------------------------------------- */
+  if (filterSummaryLines.length > 0) {
+    const fPad = 4 * K, fRowH = 5.4 * K, fHeaderH = 8 * K, fW = 78 * K;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(6.6 * K);
+    const wrapped = filterSummaryLines.flatMap((line) => doc.splitTextToSize(line, fW - fPad * 2));
+    const fH = fHeaderH + wrapped.length * fRowH + fPad;
+    const fX = frameX + 7 * K, fY = afterLegendY + 5 * K;
+
+    doc.setFillColor(255, 255, 255);
+    doc.setDrawColor(INK[0], INK[1], INK[2]);
+    doc.setLineWidth(0.35);
+    doc.rect(fX, fY, fW, fH, "FD");
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9 * K);
+    doc.setTextColor(INK[0], INK[1], INK[2]);
+    doc.text("ACTIVE FILTERS", fX + fPad, fY + fHeaderH / 2 + 1.6 * K);
+    doc.setDrawColor(195, 200, 205);
+    doc.setLineWidth(0.2);
+    doc.line(fX, fY + fHeaderH, fX + fW, fY + fHeaderH);
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(6.6 * K);
+    doc.setTextColor(68, 68, 68);
+    wrapped.forEach((line, i) => {
+      doc.text(line, fX + fPad, fY + fHeaderH + fPad + fRowH * i + 3 * K);
     });
   }
 

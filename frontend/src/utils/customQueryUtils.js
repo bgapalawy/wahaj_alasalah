@@ -83,3 +83,41 @@ export function evaluateCustomQuery(conditions, context) {
   });
   return matching;
 }
+
+const VILLA_ATTRIBUTE_LABELS = { zonenum: "Zone", blocknum: "Block", villatype: "Villa Type", villaID: "Villa" };
+
+/**
+ * Human-readable, one-line-per-condition summary of a custom query — for
+ * display anywhere the CustomQueryBuilder UI itself isn't available (e.g.
+ * the printed PDF layout sheet's "Active Filters" box). Each line already
+ * carries its own leading "AND"/"OR" conjunction (condition after the
+ * first), matching the same left-to-right model evaluateCustomQuery uses.
+ *
+ * `constructionItemsById` — Map<TableItemID, item> (build from
+ * constructionItemsApi.list() results) — used to resolve an itemStatus
+ * condition's tableItemId into its readable name instead of the raw
+ * TableItemID. Falls back to the raw id if the map/item isn't available.
+ */
+export function describeCustomQueryConditions(conditions, { constructionItemsById } = {}) {
+  if (!conditions || conditions.length === 0) return [];
+  return conditions.map((cond, i) => {
+    const prefix = i === 0 ? "" : `${cond.conjunction ?? "AND"} `;
+    const opWord = cond.operator === "!=" ? "is none of" : "is any of";
+    const values = toArray(cond.value);
+    const valueText = values.length > 0 ? values.join(", ") : "(none selected)";
+
+    if (cond.type === "itemStatus") {
+      const item = constructionItemsById?.get(cond.tableItemId);
+      const itemLabel = item?.name ?? cond.tableItemId ?? "(item)";
+      const sourceLabel = cond.statusSource === "invoice" ? "Invoice" : "Status";
+      return `${prefix}${itemLabel} ${sourceLabel} ${opWord}: ${valueText}`;
+    }
+    if (cond.type === "villaAttribute") {
+      return `${prefix}${VILLA_ATTRIBUTE_LABELS[cond.field] ?? cond.field} ${opWord}: ${valueText}`;
+    }
+    if (cond.type === "specialQuery") {
+      return `${prefix}${cond.column || "(column)"} ${opWord}: ${valueText}`;
+    }
+    return `${prefix}(unknown condition)`;
+  });
+}

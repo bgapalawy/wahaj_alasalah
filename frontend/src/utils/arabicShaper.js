@@ -144,11 +144,24 @@ function shapeArabic(text) {
 }
 
 /**
- * Shape + reverse Arabic text for direct use in jsPDF's doc.text(). Only
- * correct for a pure (or Arabic + neutral punctuation/spaces) RTL string —
- * not a general bidi algorithm for mixed Arabic/Latin runs. That's all
- * these construction-item nameArabic labels are, so it's sufficient here.
+ * Shape Arabic text for direct use in jsPDF's doc.text().
+ *
+ * NOTE: this used to also reverse() the shaped string before returning it,
+ * because older jsPDF versions laid out characters in raw memory order
+ * with no bidi reordering at all — so shaping without reversing rendered
+ * back-to-front. jsPDF 4.x (see its internal `preProcessText`/
+ * `processArabic` pipeline) now reorders Arabic-range text into visual
+ * order itself as part of doc.text(). Manually reversing on top of that
+ * double-reverses it — the corrupted-looking, wrong-word-order output
+ * this function used to produce. Verified directly: decoded the actual
+ * glyph IDs jsPDF writes into the PDF content stream (via its own
+ * ToUnicode CMap) and confirmed shape-only input (no reverse) produces
+ * output that matches the industry-standard `arabic_reshaper` +
+ * `python-bidi` visual-order reference byte-for-byte, while shape+reverse
+ * does not. If a future jsPDF version removes its own reordering, this
+ * would need the reverse() restored — the fix in that case is to check
+ * jsPDF's CHANGELOG for its Arabic/bidi handling before re-adding it.
  */
 export function shapeArabicForPdf(text) {
-  return [...shapeArabic(text)].reverse().join("");
+  return shapeArabic(text);
 }

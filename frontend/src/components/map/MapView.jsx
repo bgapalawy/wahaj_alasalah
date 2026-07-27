@@ -14,7 +14,7 @@ import { useAllVillaInvoiceStatuses } from "../../hooks/useAllVillaInvoiceStatus
 import { useSpecialQueryData } from "../../hooks/useSpecialQueryData.js";
 import { renderPrintableMap } from "../../utils/renderPrintableMap.js";
 import { computeScheduleStatusFast } from "../../utils/scheduleUtils.js";
-import { evaluateCustomQuery } from "../../utils/customQueryUtils.js";
+import { evaluateCustomQuery, describeCustomQueryConditions } from "../../utils/customQueryUtils.js";
 import { computeEdgeOrientation } from "../../utils/blockOrientation.js";
 import { constructionItemsApi } from "../../api/constructionItems.js";
 import { ITEM_STATUS_ORDER } from "../../config/itemStatusColors.js";
@@ -350,6 +350,8 @@ export const MapView = forwardRef(function MapView(
         customQueryVillaIDs,
         customQueryColors: customQueryConditions.length > 0 ? getColors("customQuery") : null,
         titleText: "Sahms ElGhroub — Site Map",
+        filterSummaryLines,
+        itemNameArabic: customQueryConditions.length === 0 ? (colorByItem?.nameArabic ?? null) : null,
         subtitleText: customQueryConditions.length > 0
           ? "Colored by custom query"
           : colorByItem
@@ -396,6 +398,14 @@ export const MapView = forwardRef(function MapView(
         customQueryVillaIDs,
         customQueryColors: customQueryConditions.length > 0 ? getColors("customQuery") : null,
         titleText: options.printWindow ? "Site Map — Selected Area" : "Site Map — Villa Status",
+        // Readable filter/custom-query summary, drawn as its own "Active
+        // Filters" box on the printed sheet — see buildVectorLayoutPdf.js.
+        filterSummaryLines,
+        // Only meaningful for the single-item "Color map by item" mode
+        // (not custom query, not the column mode) — drawn under the
+        // English subtitle in the title block via the embedded Arabic font.
+        itemNameArabic:
+          customQueryConditions.length === 0 && colorMode !== "column" ? (colorByItem?.nameArabic ?? null) : null,
         subtitleText: customQueryConditions.length > 0
           ? "Colored by custom query"
           : colorMode === "column" && selectedSpecialQueryColumn
@@ -633,6 +643,34 @@ export const MapView = forwardRef(function MapView(
       specialQueryByVilla: mergedSpecialQueryByVilla,
     });
   }, [customQueryConditions, allVillaStatuses, allVillaInvoiceStatuses, villaMetaByID, mergedSpecialQueryByVilla]);
+
+  // Readable summaries of whatever's currently narrowing the map — the
+  // plain Zone/Block/Villa Type/Villa filters below AND the custom query
+  // above — so the printed PDF (buildVectorLayoutPdf's "Active Filters"
+  // box) can show exactly what was applied instead of just "filtered".
+  const constructionItemsById = useMemo(
+    () => new Map(constructionItemsTemplate.map((item) => [item.TableItemID, item])),
+    [constructionItemsTemplate]
+  );
+
+  const activeFilterLines = useMemo(() => {
+    const lines = [];
+    if (selectedZones.length > 0) lines.push(`Zone is any of: ${selectedZones.join(", ")}`);
+    if (selectedBlocks.length > 0) lines.push(`Block is any of: ${selectedBlocks.join(", ")}`);
+    if (selectedVillaTypes.length > 0) lines.push(`Villa Type is any of: ${selectedVillaTypes.join(", ")}`);
+    if (selectedVillas.length > 0) lines.push(`Villa is any of: ${selectedVillas.join(", ")}`);
+    return lines;
+  }, [selectedZones, selectedBlocks, selectedVillaTypes, selectedVillas]);
+
+  const customQueryLines = useMemo(
+    () => describeCustomQueryConditions(customQueryConditions, { constructionItemsById }),
+    [customQueryConditions, constructionItemsById]
+  );
+
+  const filterSummaryLines = useMemo(
+    () => [...activeFilterLines, ...customQueryLines],
+    [activeFilterLines, customQueryLines]
+  );
 
   // Hierarchy: Zone > Block > Villa Type > Villa. Each level narrows the
   // options for the next.
