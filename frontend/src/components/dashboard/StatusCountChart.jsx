@@ -15,6 +15,34 @@ import { Bar } from "react-chartjs-2";
 // chunks, loaded independently.
 ChartJS.register(CategoryScale, LinearScale, BarElement, Tooltip, Legend);
 
+// Draws the count above each bar. A hand-rolled plugin object rather
+// than pulling in chartjs-plugin-datalabels as a new dependency — this
+// component only needs one number per bar, not that plugin's full
+// feature set, and passing it via react-chartjs-2's per-chart `plugins`
+// prop below means it's scoped to just this chart, not registered
+// globally for every Chart.js instance in the app.
+const barCountLabelsPlugin = {
+  id: "barCountLabels",
+  afterDatasetsDraw(chart) {
+    const { ctx } = chart;
+    chart.data.datasets.forEach((dataset, datasetIndex) => {
+      const meta = chart.getDatasetMeta(datasetIndex);
+      if (meta.hidden) return;
+      meta.data.forEach((bar, index) => {
+        const value = dataset.data[index];
+        if (value == null) return;
+        ctx.save();
+        ctx.fillStyle = "#1f2937";
+        ctx.font = "600 12px system-ui, sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "bottom";
+        ctx.fillText(String(value), bar.x, bar.y - 4);
+        ctx.restore();
+      });
+    });
+  },
+};
+
 // Same palette used for the status timeline's dots (StatusTimeline.jsx)
 // — kept local for the same reason: this is the only place in this
 // component that needs status-specific color, not worth a shared import.
@@ -111,11 +139,22 @@ export function StatusCountChart({ items, getLabel = (item) => item.status, heig
     <div style={{ height }}>
       <Bar
         data={data}
+        plugins={[barCountLabelsPlugin]}
         options={{
           responsive: true,
           maintainAspectRatio: false,
           plugins: { legend: { display: false } },
-          scales: { y: { beginAtZero: true, ticks: { precision: 0 } } },
+          layout: { padding: { top: 16 } },
+          scales: {
+            y: {
+              beginAtZero: true,
+              ticks: { precision: 0 },
+              // A little headroom above the tallest bar so its count
+              // label (drawn above the bar) doesn't get clipped by the
+              // chart's own top edge.
+              suggestedMax: Math.max(...labels.map((l) => counts[l]), 0) * 1.15 || 1,
+            },
+          },
         }}
       />
     </div>
