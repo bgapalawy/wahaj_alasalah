@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { settingsApi } from "../../api/settings.js";
 import { uploadsApi } from "../../api/uploads.js";
+import { useDraggable } from "../../hooks/useDraggable.js";
 
 const LOGO_SLOT_COUNT = 5;
 const LOGO_PREFIXES = Array.from({ length: LOGO_SLOT_COUNT }, (_, i) => `branding-logo-${i + 1}`);
@@ -16,12 +17,16 @@ const LOGO_PREFIXES = Array.from({ length: LOGO_SLOT_COUNT }, (_, i) => `brandin
  * Collapsible with a persistent header (matches MapItemColorControl's
  * pattern) — the collapse toggle stays reachable in every state
  * (collapsed, expanded, or mid-edit), instead of a save/cancel flow
- * being the only way back to a stable view.
+ * being the only way back to a stable view. Also draggable by that same
+ * header, same as MapItemColorControl and the Admin modal (useDraggable) —
+ * so it can be moved out of the way of whatever part of the map it's
+ * currently covering.
  *
  * Also read directly by buildVectorLayoutPdf.js so the PDF export shows
  * the same branding in the title block.
  */
 export function ProjectBranding() {
+  const { handleRef: dragHandleRef, style: dragStyle } = useDraggable();
   const [settings, setSettings] = useState(null);
   const [collapsed, setCollapsed] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -119,8 +124,8 @@ export function ProjectBranding() {
   const activeLogos = (settings.logos ?? []).filter((l) => l?.logoUrl || l?.caption);
 
   return (
-    <div className={`map-branding ${editing ? "is-editing" : ""}`}>
-      <div className="map-branding-header">
+    <div className={`map-branding ${editing ? "is-editing" : ""}`} style={dragStyle}>
+      <div className="map-branding-header is-draggable" ref={dragHandleRef}>
         <span className="map-branding-header-title">{settings.projectName || "Branding"}</span>
         <span className="map-branding-header-actions">
           {!collapsed && !editing && (
