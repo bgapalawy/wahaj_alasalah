@@ -228,6 +228,12 @@ export async function buildVectorLayoutPdf({
     });
   }
 
+  // `visible` (see below) is scoped to the current print window, but
+  // `labels` itself is ALWAYS built from every villa in the dataset,
+  // window or no window — see the Pass 1b comment further down for why:
+  // the rotation-correction algorithm needs the FULL population to
+  // produce the same stable result a "Print Area" export gets as the
+  // full "Download PDF" export already does.
   const labels = [];
   const nonVillaFill = hexToRgb("#eef0f2");
   const nonVillaStroke = hexToRgb("#c3c8cd");
@@ -235,11 +241,12 @@ export async function buildVectorLayoutPdf({
   const hlStroke = hexToRgb("#ea580c");
 
   (geojson.features ?? []).forEach((f) => {
-    if (!f.geometry || !featureVisible(f.geometry)) return;
+    if (!f.geometry) return;
     const villaID = f.properties?.villaID;
+    const visible = featureVisible(f.geometry);
 
     if (!villaID || villaID === "NOT_VILLA") {
-      drawPolyFeature(f.geometry, { fill: nonVillaFill, stroke: nonVillaStroke, lineWidth: 0.07 });
+      if (visible) drawPolyFeature(f.geometry, { fill: nonVillaFill, stroke: nonVillaStroke, lineWidth: 0.07 });
       return;
     }
 
@@ -256,11 +263,13 @@ export async function buildVectorLayoutPdf({
     } else {
       fillHex = "#dbeafe";
     }
-    drawPolyFeature(f.geometry, {
-      fill: hexToRgb(fillHex),
-      stroke: isHl ? hlStroke : parcelStroke,
-      lineWidth: isHl ? 0.5 : 0.08,
-    });
+    if (visible) {
+      drawPolyFeature(f.geometry, {
+        fill: hexToRgb(fillHex),
+        stroke: isHl ? hlStroke : parcelStroke,
+        lineWidth: isHl ? 0.5 : 0.08,
+      });
+    }
 
     // Normally villanum ("40") mirrors villaID ("V_40") exactly, but a
     // handful of real villas have a missing/inconsistent villanum
@@ -325,6 +334,7 @@ export async function buildVectorLayoutPdf({
       cadAngle: isFinite(cadAngle) ? cadAngle : null,
       cadHeightM: isFinite(cadHeightM) && cadHeightM > 0 ? cadHeightM : null,
       ring: pts,
+      visible,
     });
   });
 
@@ -539,6 +549,25 @@ export async function buildVectorLayoutPdf({
 
   // Pass 1: initial angle per label (CAD angle if trustworthy, else the
   // parcel's own long-axis fit).
+  //
+  // Deliberately runs over EVERY label in `labels`, not just the ones
+  // visible in the current print window — same as Pass 1b right below.
+  // A "Print Area" export used to build this array (and therefore the
+  // whole rotation graph) from only the villas inside the selected
+  // window, which meant: fewer/no real neighbors near the window's
+  // edges for Pass 1b's correction to reference, AND an arbitrary,
+  // selection-dependent choice of which villa becomes the MST's root
+  // (labels[0]) — the majority-vote correction a few lines down is a
+  // statistical heuristic that needs a large, stable population to work
+  // reliably, and a small arbitrary subset doesn't give it one. That's
+  // why the full "Download PDF" export (which never filters `labels` at
+  // all — there's no window) already looked "very good": it always had
+  // the full ~1,500-villa population. Building `labels` from the full
+  // dataset unconditionally (see its declaration above) — window or
+  // not — gives a "Print Area" export the exact same graph the full
+  // export gets, so rotation comes out identically good either way.
+  // Only which labels actually get DRAWN (`measured` below, and the
+  // fill/stroke draw calls above) stays scoped to the window.
   const angled = labels.map((L) => {
     const rect = minBoundingRect(L.ring);
     const axis = uprightAngle(rect ? rect.angleDeg : longAxisAngle(L.ring));
@@ -649,8 +678,17 @@ export async function buildVectorLayoutPdf({
     }
   }
 
+  // Pass 2 (fit sizing) intentionally switches to VISIBLE-only from here
+  // on — unlike rotation above, sizing SHOULD be based on what's
+  // actually going to be drawn on this particular sheet (a spacious
+  // "Print Area" selection shouldn't get squeezed down by the median
+  // size of some dense, unrelated part of the site that isn't even on
+  // this page), so this is the one place the print-window scoping still
+  // applies the way it always did.
+  const visibleAngled = angled.filter((a) => a.L.visible);
+
   // Pass 2: fit metrics using the (now neighbor-consistent) angle.
-  const measured = angled.map(({ L, ang }) => {
+  const measured = visibleAngled.map(({ L, ang }) => {
     const along = spanAlong(L.ring, ang);
     const across = spanAlong(L.ring, ang + 90);
     // Local cross-section through the label's OWN centroid, in the
