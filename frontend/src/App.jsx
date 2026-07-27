@@ -1,4 +1,5 @@
 import { Suspense, lazy, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { downloadVectorLayoutPdf } from "./utils/buildVectorLayoutPdf.js";
 import { settingsApi } from "./api/settings.js";
 import { MapView } from "./components/map/MapView.jsx";
@@ -161,26 +162,33 @@ export default function App() {
               🖶 Print ▾
             </button>
 
-            {showPrintMenu && printMenuPos && (
+            {showPrintMenu && printMenuPos && createPortal(
               <>
                 {/* Invisible full-screen click-catcher — closes the popover
                     on any outside click without needing a document-level
                     event listener. */}
                 <div
-                  style={{ position: "fixed", inset: 0, zIndex: 1000 }}
+                  style={{ position: "fixed", inset: 0, zIndex: 9998 }}
                   onClick={() => setShowPrintMenu(false)}
                 />
-                {/* position: fixed anchored to the button's own screen
-                    coordinates (not position: absolute nested in the
-                    header) — the header bar clips absolutely-positioned
-                    children that extend past its own bottom edge, which
-                    is what made this render as an empty sliver before. */}
+                {/* Rendered via createPortal straight into document.body,
+                    not nested inside the header — position: fixed only
+                    anchors to the real viewport when NONE of its
+                    ancestors have a transform/filter/etc. that creates a
+                    new containing block. The header (or anything between
+                    it and here) very plausibly has one for its own
+                    styling, which would silently break both this panel's
+                    positioning AND its ability to receive taps/clicks —
+                    exactly "renders in the right place but nothing in it
+                    responds to touch." A portal sidesteps the question
+                    entirely instead of needing to know what's in that
+                    CSS. */}
                 <div
                   style={{
                     position: "fixed",
                     top: printMenuPos.top,
                     left: printMenuPos.left,
-                    zIndex: 1001,
+                    zIndex: 9999,
                     display: "flex",
                     flexDirection: "column",
                     gap: "0.5rem",
@@ -229,7 +237,8 @@ export default function App() {
                     {exportingPdf ? "Preparing…" : "Download PDF"}
                   </button>
                 </div>
-              </>
+              </>,
+              document.body
             )}
           </div>
           <button type="button" className="header-dashboard-btn" onClick={() => setShowProjectDashboard(true)}>
