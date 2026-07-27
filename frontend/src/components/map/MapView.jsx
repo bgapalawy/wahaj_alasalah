@@ -63,8 +63,9 @@ function HideLabelsOnZoom({ onZoomStart }) {
 // No pill/background anymore, and no decluttering that moves a label off
 // its own block — sized to fit within the block's own width instead, so
 // it sits right on its block without spilling into a neighbor, and reads
-// as plain bold text over the parcel fill (a thin light halo keeps it
-// legible over the darker villa colors without needing a solid box).
+// as small, plain (non-bold) text over the parcel fill (a thin light
+// halo keeps it legible over the darker villa colors without needing a
+// solid box).
 function HighlightLabelsOverlay({ groups }) {
   const map = useMap();
   const [items, setItems] = useState([]);
@@ -75,8 +76,8 @@ function HighlightLabelsOverlay({ groups }) {
       return;
     }
 
-    const MIN_FONT_PX = 7;
-    const MAX_FONT_PX = 12;
+    const MIN_FONT_PX = 5;
+    const MAX_FONT_PX = 8;
 
     function recompute() {
       const next = groups.map((g) => {
@@ -123,6 +124,7 @@ function HighlightLabelsOverlay({ groups }) {
             left: it.x,
             top: it.y,
             fontSize: `${it.fontPx}px`,
+            fontWeight: "normal",
             transform: `translate(-50%, -50%) rotate(${it.rotationDeg}deg)`,
           }}
         >
@@ -378,11 +380,10 @@ export const MapView = forwardRef(function MapView(
         // Leaflet's LatLngBounds isn't meaningful outside a Leaflet map —
         // the PDF exporter projects raw geo coordinates itself, so hand
         // it plain numbers instead of the Leaflet instance used
-        // on-screen. lng/lat here is the EDGE anchor (near one end of
-        // the block's long axis, not its center — see labelLatLng
-        // above); westLng/eastLng stay at the bounds' own center
-        // latitude, since those are only used for the width-fit font
-        // sizing, not for where the label is drawn.
+        // on-screen. lng/lat here is the block/zone's own centroid (see
+        // labelLatLng above); westLng/eastLng stay at the bounds' own
+        // center latitude, since those are only used for the width-fit
+        // font sizing, not for where the label is drawn.
         highlightGroupLabels: (highlightShowLabel ? highlightGroupLabels : []).map((g) => {
           const center = g.bounds.getCenter();
           return {
@@ -848,11 +849,10 @@ export const MapView = forwardRef(function MapView(
         if (!bounds) return null;
         const center = bounds.getCenter();
         const orientation = computeEdgeOrientation(ringPointsFor(g.villaIDs), center.lat);
-        // Positioned near one end of the block's own long axis (still
-        // rotated the same way) instead of the dead-center of the whole
-        // cluster — same idea as the villa numbers reading along a
-        // parcel, but anchored toward the block's edge per request.
-        const labelLatLng = L.latLng(center.lat + orientation.offsetLat, center.lng + orientation.offsetLng);
+        // Centered on the block/zone's own centroid — still rotated to
+        // follow the block's long axis (via orientation.angleDeg), just
+        // no longer offset toward one edge.
+        const labelLatLng = center;
         return { ...g, bounds, rotationDeg: orientation.angleDeg, labelLatLng };
       })
       .filter(Boolean);

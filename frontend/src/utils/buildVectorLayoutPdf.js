@@ -738,16 +738,16 @@ export async function buildVectorLayoutPdf({
   // without needing a solid box.
   if (highlightGroupLabels.length > 0) {
     const labelColor = hexToRgb("#ea580c");
-    const MIN_FONT_MM = 1.1 * Kfont;
-    const MAX_FONT_MM = 2.0 * Kfont; // caps zone labels too — their own bounding box is far too wide to fit-to-width sensibly
+    const MIN_FONT_MM = 0.8 * Kfont;
+    const MAX_FONT_MM = 1.3 * Kfont; // caps zone labels too — their own bounding box is far too wide to fit-to-width sensibly
     const haloStep = 0.12 * K;
     const haloOffsets = [[-1, -1], [1, -1], [-1, 1], [1, 1], [0, -1], [0, 1], [-1, 0], [1, 0]];
 
-    doc.setFont("helvetica", "bold");
+    doc.setFont("helvetica", "normal");
 
     highlightGroupLabels.forEach((g) => {
       if (g.lng == null || g.lat == null) return;
-      const [cx, cy] = project([g.lng, g.lat]); // edge anchor, not the block's center
+      const [cx, cy] = project([g.lng, g.lat]); // block/zone centroid
 
       const widthSampleLat = g.widthSampleLat ?? g.lat;
       let blockWidthMm = MAX_FONT_MM * 20; // no bounds given — fall back to the size cap only
