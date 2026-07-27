@@ -5,6 +5,7 @@ import { MapView } from "./components/map/MapView.jsx";
 import { VillaDetailsPanel } from "./components/panels/VillaDetailsPanel.jsx";
 import { useDraggable } from "./hooks/useDraggable.js";
 import { useLoggedInUser, logout } from "./components/auth/AuthGate.jsx";
+import { ContactDeveloperModal } from "./components/header/ContactDeveloperModal.jsx";
 import "./styles/app.css";
 
 // Chart.js + xlsx are heavy — only load when the project dashboard opens.
@@ -17,11 +18,8 @@ const AdminImportExport = lazy(() =>
 const ColorSettingsPanel = lazy(() =>
   import("./components/settings/ColorSettingsPanel.jsx").then((m) => ({ default: m.ColorSettingsPanel }))
 );
-const OutOfSequenceReport = lazy(() =>
-  import("./components/dashboard/OutOfSequenceReport.jsx").then((m) => ({ default: m.OutOfSequenceReport }))
-);
-const NcrReport = lazy(() =>
-  import("./components/dashboard/NcrReport.jsx").then((m) => ({ default: m.NcrReport }))
+const QualityDashboard = lazy(() =>
+  import("./components/dashboard/QualityDashboard.jsx").then((m) => ({ default: m.QualityDashboard }))
 );
 
 export default function App() {
@@ -32,8 +30,19 @@ export default function App() {
   const { handleRef: adminDragHandleRef, style: adminDragStyle } = useDraggable();
   const [showColorSettings, setShowColorSettings] = useState(false);
   const [labelsEnabled, setLabelsEnabled] = useState(false);
-  const [showOutOfSequence, setShowOutOfSequence] = useState(false);
-  const [showNcrReport, setShowNcrReport] = useState(false);
+  const [showQuality, setShowQuality] = useState(false);
+  const [showContactDeveloper, setShowContactDeveloper] = useState(false);
+  const [showPrintMenu, setShowPrintMenu] = useState(false);
+  const [printMenuPos, setPrintMenuPos] = useState(null);
+  const printButtonRef = useRef(null);
+
+  function togglePrintMenu() {
+    if (!showPrintMenu && printButtonRef.current) {
+      const rect = printButtonRef.current.getBoundingClientRect();
+      setPrintMenuPos({ top: rect.bottom + 6, left: rect.left });
+    }
+    setShowPrintMenu((v) => !v);
+  }
   const [exportingPdf, setExportingPdf] = useState(false);
   const [selectingArea, setSelectingArea] = useState(false);
   // Lifted up from MapView so the villa panel can pre-select the same
@@ -136,43 +145,107 @@ export default function App() {
       <header className="app-header">
         <h1>Sahms ElGhroub</h1>
         <div className="app-header-actions">
-          <select
-            className="paper-size-select"
-            value={paperSize}
-            onChange={(e) => setPaperSize(e.target.value)}
-            disabled={exportingPdf || selectingArea}
-            aria-label="Plot paper size"
-            title="Plot paper size"
-          >
-            <option value="a1">A1</option>
-            <option value="a2">A2</option>
-            <option value="a3">A3</option>
-          </select>
-          <button
-            type="button"
-            className="header-dashboard-btn"
-            onClick={handlePrintArea}
-            disabled={exportingPdf || selectingArea}
-          >
-            {selectingArea ? "Drag on map…" : "Print Area"}
-          </button>
-          <button type="button" className="header-dashboard-btn" onClick={handleExportPdfDirect} disabled={exportingPdf || selectingArea}>
-            {exportingPdf ? "Preparing…" : "Download PDF"}
-          </button>
+          {/* Single icon groups all three printing controls (paper size,
+              Print Area, Download PDF) behind one button instead of
+              showing them inline — clicking it pops up the options. */}
+          <div style={{ position: "relative" }}>
+            <button
+              ref={printButtonRef}
+              type="button"
+              className="header-dashboard-btn"
+              onClick={togglePrintMenu}
+              disabled={exportingPdf || selectingArea}
+              aria-label="Printing options"
+              title="Printing options"
+            >
+              🖶 Print ▾
+            </button>
+
+            {showPrintMenu && printMenuPos && (
+              <>
+                {/* Invisible full-screen click-catcher — closes the popover
+                    on any outside click without needing a document-level
+                    event listener. */}
+                <div
+                  style={{ position: "fixed", inset: 0, zIndex: 1000 }}
+                  onClick={() => setShowPrintMenu(false)}
+                />
+                {/* position: fixed anchored to the button's own screen
+                    coordinates (not position: absolute nested in the
+                    header) — the header bar clips absolutely-positioned
+                    children that extend past its own bottom edge, which
+                    is what made this render as an empty sliver before. */}
+                <div
+                  style={{
+                    position: "fixed",
+                    top: printMenuPos.top,
+                    left: printMenuPos.left,
+                    zIndex: 1001,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "0.5rem",
+                    padding: "0.6rem",
+                    minWidth: "220px",
+                    color: "#1f2937",
+                    backgroundColor: "#ffffff",
+                    border: "1px solid #d1d5db",
+                    borderRadius: "8px",
+                    boxShadow: "0 4px 16px rgba(0,0,0,0.2)",
+                  }}
+                >
+                  <label style={{ display: "flex", flexDirection: "column", gap: "0.2rem" }}>
+                    <span style={{ fontSize: "0.8em", color: "#6b7280" }}>Plot paper size</span>
+                    <select
+                      value={paperSize}
+                      onChange={(e) => setPaperSize(e.target.value)}
+                      disabled={exportingPdf || selectingArea}
+                      style={{ color: "#1f2937", backgroundColor: "#ffffff", padding: "0.35rem", borderRadius: "6px", border: "1px solid #d1d5db" }}
+                    >
+                      <option value="a1">A1</option>
+                      <option value="a2">A2</option>
+                      <option value="a3">A3</option>
+                    </select>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowPrintMenu(false);
+                      handlePrintArea();
+                    }}
+                    disabled={exportingPdf || selectingArea}
+                    style={{ padding: "0.4rem 0.6rem", borderRadius: "6px", border: "1px solid #d1d5db", backgroundColor: "#f3f4f6", color: "#1f2937", cursor: "pointer" }}
+                  >
+                    {selectingArea ? "Drag on map…" : "Print Area"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowPrintMenu(false);
+                      handleExportPdfDirect();
+                    }}
+                    disabled={exportingPdf || selectingArea}
+                    style={{ padding: "0.4rem 0.6rem", borderRadius: "6px", border: "1px solid #d1d5db", backgroundColor: "#f3f4f6", color: "#1f2937", cursor: "pointer" }}
+                  >
+                    {exportingPdf ? "Preparing…" : "Download PDF"}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
           <button type="button" className="header-dashboard-btn" onClick={() => setShowProjectDashboard(true)}>
             Project Dashboard
           </button>
-          <button type="button" className="header-dashboard-btn" onClick={() => setShowOutOfSequence(true)}>
-            Out of Sequence
+          <button type="button" className="header-dashboard-btn" onClick={() => setShowQuality(true)}>
+            Quality
           </button>
-          <button type="button" className="header-dashboard-btn" onClick={() => setShowNcrReport(true)}>
-  NCRs
-</button>
           <button type="button" className="header-admin-btn" onClick={() => setShowAdmin(true)}>
             Admin
           </button>
           <button type="button" className="header-dashboard-btn" onClick={() => setShowColorSettings(true)}>
             Colors
+          </button>
+          <button type="button" className="header-dashboard-btn" onClick={() => setShowContactDeveloper(true)}>
+            Contact Developer
           </button>
           <span className="app-header-user">
             {loggedInUser && <span>{loggedInUser}</span>}
@@ -221,16 +294,13 @@ export default function App() {
         </div>
       )}
 
-      {showOutOfSequence && (
+      {showQuality && (
         <Suspense fallback={null}>
-          <OutOfSequenceReport onClose={() => setShowOutOfSequence(false)} />
+          <QualityDashboard onClose={() => setShowQuality(false)} />
         </Suspense>
       )}
-      {showNcrReport && (
-  <Suspense fallback={null}>
-    <NcrReport onClose={() => setShowNcrReport(false)} />
-  </Suspense>
-)}
+
+      {showContactDeveloper && <ContactDeveloperModal onClose={() => setShowContactDeveloper(false)} />}
 
       {showAdmin && (
         <div className="graph-modal-backdrop" onClick={() => setShowAdmin(false)}>

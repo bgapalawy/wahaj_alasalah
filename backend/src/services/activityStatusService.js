@@ -13,15 +13,29 @@ import { autoUpdateInvoiceOnCompletion } from "./invoiceService.js";
  * { status, completedDate } shape callers already expect (the
  * dashboards, the dependency graph, computeVillaStatus) — only the data
  * source changed, not the contract.
+ *
+ * `completedDate` now also carries the status date for NCR/Rejected, not
+ * just Completed (kept the same field name rather than renaming it
+ * everywhere that already reads it, but it really means "the date this
+ * status was set to"). `note` carries reason text for NCR/Rejected, or
+ * general notes for Completed/Notes/NotStarted (NOTE_STATUSES below is
+ * intentionally wider than DATED_STATUSES — a note doesn't require a
+ * date), stored both as the CURRENT value on villa_item_status (fast to
+ * read alongside status) and appended to villa_item_status_history (see
+ * recordStatusHistory below), which is what the new status timeline
+ * reads from.
  */
+
+const DATED_STATUSES = new Set(["Completed", "NCR", "Rejected"]);
+const NOTE_STATUSES = new Set(["Completed", "NCR", "Rejected", "Notes", "NotStarted"]);
 
 export async function getActivityStatus(villaID, tableItemId) {
   const { rows } = await query(
-    `SELECT status, to_char(actual_date, 'YYYY-MM-DD') AS actual_date FROM villa_item_status WHERE villa_id = $1 AND table_item_id = $2`,
+    `SELECT status, note, to_char(actual_date, 'YYYY-MM-DD') AS actual_date FROM villa_item_status WHERE villa_id = $1 AND table_item_id = $2`,
     [villaID, tableItemId]
   );
-  if (rows.length === 0) return { status: "NotStarted", completedDate: null };
-  return { status: rows[0].status ?? "NotStarted", completedDate: rows[0].actual_date };
+  if (rows.length === 0) return { status: "NotStarted", completedDate: null, note: null };
+  return { status: rows[0].status ?? "NotStarted", completedDate: rows[0].actual_date, note: rows[0].note ?? null };
 }
 
 /**
@@ -35,12 +49,12 @@ export async function getActivityStatus(villaID, tableItemId) {
  */
 export async function getAllActivityStatuses(villaID) {
   const { rows } = await query(
-    `SELECT table_item_id, status, to_char(actual_date, 'YYYY-MM-DD') AS actual_date FROM villa_item_status WHERE villa_id = $1`,
+    `SELECT table_item_id, status, note, to_char(actual_date, 'YYYY-MM-DD') AS actual_date FROM villa_item_status WHERE villa_id = $1`,
     [villaID]
   );
   const result = {};
   rows.forEach((r) => {
-    result[r.table_item_id] = { status: r.status ?? "NotStarted", completedDate: r.actual_date ?? null };
+    result[r.table_item_id] = { status: r.status ?? "NotStarted", completedDate: r.actual_date ?? null, note: r.note ?? null };
   });
   return result;
 }
@@ -61,19 +75,21 @@ export async function getAllActivityStatuses(villaID) {
  */
 const VALID_ACTIVITY_STATUSES = new Set(["NotStarted", "InProgress", "Completed", "NCR", "Rejected", "Notes"]);
 
-export async function updateActivityStatus(villaID, tableItemId, { status, completedDate }) {
+export async function updateActivityStatus(villaID, tableItemId, { status, completedDate, note }) {
   if (!VALID_ACTIVITY_STATUSES.has(status)) {
     const err = new Error(`"${status}" is not a valid activity status.`);
     err.status = 400;
     throw err;
   }
-  // No longer a hard requirement — if left blank while marking Completed,
-  // this defaults to today (via the database's own CURRENT_DATE, not the
-  // Node process's clock, for the same timezone-safety reason actual_date
-  // is read back with to_char() elsewhere in this file). Still enforces
-  // the other half of the rule unconditionally: non-Completed always
-  // clears the date, so status and actual_date can't drift apart.
-  const normalizedCompletedDate = status === "Completed" ? completedDate || null : null;
+  // Completed/NCR/Rejected all carry a date now — Completed still won't
+  // silently default (the frontend enforces picking one deliberately),
+  // but this COALESCE stays as a defensive backend fallback for all
+  // three so status/actual_date can never end up mismatched even if a
+  // caller other than the current UI forgets to send one. Any other
+  // status always clears both the date and the note, so nothing lingers
+  // from a previous NCR/Rejected/Completed pass once you move off it.
+  const normalizedCompletedDate = DATED_STATUSES.has(status) ? completedDate || null : null;
+  const normalizedNote = NOTE_STATUSES.has(status) ? note?.trim() || null : null;
 
   const previous = await getActivityStatus(villaID, tableItemId).catch(() => ({ status: "NotStarted" }));
   const previousStatus = previous.status;
@@ -81,16 +97,17 @@ export async function updateActivityStatus(villaID, tableItemId, { status, compl
   let result;
   try {
     const { rows } = await query(
-      `INSERT INTO villa_item_status (villa_id, table_item_id, status, actual_date)
-       VALUES ($1, $2, $3, CASE WHEN $3 = 'Completed' THEN COALESCE($4::date, CURRENT_DATE) ELSE NULL END)
+      `INSERT INTO villa_item_status (villa_id, table_item_id, status, actual_date, note)
+       VALUES ($1, $2, $3, CASE WHEN $3 IN ('Completed','NCR','Rejected') THEN COALESCE($4::date, CURRENT_DATE) ELSE NULL END, $5)
        ON CONFLICT (villa_id, table_item_id) DO UPDATE SET
          status = EXCLUDED.status,
          actual_date = EXCLUDED.actual_date,
+         note = EXCLUDED.note,
          actual_cost = CASE WHEN EXCLUDED.status = 'Completed'
                              THEN villa_item_status.planned_cost
                              ELSE NULL END
-       RETURNING status, to_char(actual_date, 'YYYY-MM-DD') AS actual_date, actual_cost::float8 AS actual_cost`,
-      [villaID, tableItemId, status, normalizedCompletedDate]
+       RETURNING status, to_char(actual_date, 'YYYY-MM-DD') AS actual_date, actual_cost::float8 AS actual_cost, note`,
+      [villaID, tableItemId, status, normalizedCompletedDate, normalizedNote]
     );
     result = rows[0];
   } catch (err) {
@@ -98,6 +115,19 @@ export async function updateActivityStatus(villaID, tableItemId, { status, compl
     wrapped.status = 500;
     throw wrapped;
   }
+
+  // Append-only log for the status timeline — one row per save,
+  // regardless of status, so the timeline can show the full lifecycle
+  // (NotStarted -> InProgress -> ... -> Completed), not just the dated
+  // statuses. A failure here shouldn't fail the status save itself; the
+  // current status already saved successfully above.
+  await recordStatusHistory(villaID, tableItemId, {
+    status: result?.status ?? status,
+    statusDate: result?.actual_date ?? normalizedCompletedDate,
+    note: result?.note ?? normalizedNote,
+  }).catch((err) => {
+    console.error(`Could not record status history: ${err.message}`);
+  });
 
   await autoUpdateInvoiceOnCompletion(villaID, tableItemId, previousStatus, status).catch((err) => {
     // Don't fail the whole status save just because the invoice
@@ -110,8 +140,52 @@ export async function updateActivityStatus(villaID, tableItemId, { status, compl
     status: result?.status ?? status,
     completedDate: result?.actual_date ?? normalizedCompletedDate,
     actualCost: result?.actual_cost ?? null,
+    note: result?.note ?? normalizedNote,
   };
 }
+
+/**
+ * Appends one row to villa_item_status_history — the source for the
+ * status timeline (StatusTimeline.jsx). Separate table from
+ * villa_item_status on purpose: villa_item_status is "current state,
+ * fast to read"; this is "every change, ever," so it only ever grows
+ * and is never updated in place.
+ */
+async function recordStatusHistory(villaID, tableItemId, { status, statusDate, note }) {
+  await query(
+    `INSERT INTO villa_item_status_history (villa_id, table_item_id, status, status_date, note)
+     VALUES ($1, $2, $3, $4::date, $5)`,
+    [villaID, tableItemId, status, statusDate, note]
+  );
+}
+
+/**
+ * Full status history for one villa/item, oldest first — powers the
+ * "Not Started -> ... -> Completed" timeline. `created_at` (not
+ * status_date, which is often null for undated statuses like InProgress)
+ * is the real chronological order these changes actually happened in.
+ */
+export async function getActivityStatusHistory(villaID, tableItemId) {
+  const { rows } = await query(
+    `SELECT status, to_char(status_date, 'YYYY-MM-DD') AS status_date, note,
+            created_at
+     FROM villa_item_status_history
+     WHERE villa_id = $1 AND table_item_id = $2
+     ORDER BY created_at ASC`,
+    [villaID, tableItemId]
+  );
+  return rows.map((r) => ({
+    status: r.status,
+    statusDate: r.status_date,
+    note: r.note,
+    recordedAt: r.created_at,
+  }));
+}
+
+// getNcrReportRows moved to ncrService.js — the NCR report now reads
+// from the dedicated villa_item_ncr table (supports multiple/closeable
+// NCRs per item) instead of deriving NCR membership from this table's
+// single-value status column.
 
 /**
  * Derives a villa's overall status from its individual activity statuses:
@@ -144,11 +218,39 @@ export async function getManyActivityStatuses(villaIDs) {
   if (villaIDs.length === 0) return merged;
 
   const { rows } = await query(
-    `SELECT villa_id, table_item_id, status, to_char(actual_date, 'YYYY-MM-DD') AS actual_date FROM villa_item_status WHERE villa_id = ANY($1)`,
+    `SELECT villa_id, table_item_id, status, note, to_char(actual_date, 'YYYY-MM-DD') AS actual_date FROM villa_item_status WHERE villa_id = ANY($1)`,
     [villaIDs]
   );
   rows.forEach((r) => {
-    merged[r.villa_id][r.table_item_id] = { status: r.status ?? "NotStarted", completedDate: r.actual_date ?? null };
+    merged[r.villa_id][r.table_item_id] = { status: r.status ?? "NotStarted", completedDate: r.actual_date ?? null, note: r.note ?? null };
   });
   return merged;
+}
+
+/**
+ * Every (villa, item) that has EVER had a status recorded, across the
+ * whole project — feeds the new "Villa Status" tab in the Quality
+ * dashboard (QualityDashboard.jsx / VillaStatusReport.jsx). Deliberately
+ * scoped the same way the NCR and Out-of-Sequence reports already are:
+ * rows that exist, not a full villas x construction_items cross-product
+ * (~1,500 villas x 82 items) — a villa/item with no row here is
+ * implicitly NotStarted and not shown, same convention
+ * getAllActivityStatuses already uses. Zone/block for filtering are
+ * joined client-side against useVillaGeoMeta, not here, since that data
+ * is already loaded once for the whole map and this avoids a second
+ * join query that would just duplicate it.
+ */
+export async function getStatusReportRows() {
+  const { rows } = await query(
+    `SELECT villa_id, table_item_id, status, note, to_char(actual_date, 'YYYY-MM-DD') AS actual_date
+     FROM villa_item_status
+     ORDER BY villa_id, table_item_id`
+  );
+  return rows.map((r) => ({
+    villaID: r.villa_id,
+    tableItemId: r.table_item_id,
+    status: r.status ?? "NotStarted",
+    date: r.actual_date,
+    note: r.note,
+  }));
 }

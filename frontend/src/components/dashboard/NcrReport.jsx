@@ -1,49 +1,257 @@
 import { useEffect, useMemo, useState } from "react";
 import * as XLSX from "xlsx";
-import { useAllVillaStatuses } from "../../hooks/useAllVillaStatuses.js";
+import { villasApi } from "../../api/villas.js";
 import { constructionItemsApi } from "../../api/constructionItems.js";
-import { findNcrItems } from "../../utils/ncrUtils.js";
+import { useVillaGeoMeta } from "../../hooks/useVillaGeoMeta.js";
+import { getZoneOptions, getBlockOptions, matchesZoneBlock, matchesDateRange } from "../../utils/qualityFilterUtils.js";
+import { StatusCountChart } from "./StatusCountChart.jsx";
 
 /**
- * Surfaces every (villa, item) currently marked with status "NCR" across
- * the whole project — same shape and data source as OutOfSequenceReport
- * (useAllVillaStatuses + the construction items template, no new backend
- * endpoint needed), just for non-conformance instead of scheduling
- * anomalies.
+ * Surfaces every NCR across the whole project — an item can now have
+ * more than one (see NcrList.jsx), each independently closeable, so
+ * this shows one row per NCR (not per villa+item) with its own date,
+ * reason, and closed/closed-date state. Reads directly from the
+ * dedicated /villas/ncr-report endpoint (ncrService.js's
+ * getNcrReportRows), which sources from villa_item_ncr.
+ *
+ * `embedded`, when true, renders just the content (no modal backdrop/
+ * header) — used by QualityDashboard.jsx, which supplies its own single
+ * shared modal shell around all three Quality tabs.
  */
-export function NcrReport({ onClose }) {
-  const { data: allVillaStatuses, status } = useAllVillaStatuses(true);
+export function NcrReport({ onClose, embedded = false }) {
+  const [rows, setRows] = useState([]);
+  const [status, setStatus] = useState("loading"); // loading | success | error
   const [constructionItemsTemplate, setConstructionItemsTemplate] = useState([]);
+  const { villaMetaByID } = useVillaGeoMeta();
+
   const [villaFilter, setVillaFilter] = useState("");
+  const [zoneFilter, setZoneFilter] = useState("");
+  const [blockFilter, setBlockFilter] = useState("");
+  const [itemFilter, setItemFilter] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [openOnly, setOpenOnly] = useState(true);
+  const [clearing, setClearing] = useState(false);
+
+  function loadReport() {
+    setStatus("loading");
+    villasApi
+      .getNcrReport()
+      .then((data) => {
+        setRows(data);
+        setStatus("success");
+      })
+      .catch(() => setStatus("error"));
+  }
 
   useEffect(() => {
+    loadReport();
     constructionItemsApi.list().then(setConstructionItemsTemplate).catch(() => setConstructionItemsTemplate([]));
   }, []);
 
+  const itemsById = useMemo(
+    () => new Map(constructionItemsTemplate.map((item) => [item.TableItemID, item])),
+    [constructionItemsTemplate]
+  );
+  const zoneOptions = useMemo(() => getZoneOptions(villaMetaByID), [villaMetaByID]);
+  const blockOptions = useMemo(() => getBlockOptions(villaMetaByID, zoneFilter), [villaMetaByID, zoneFilter]);
+
   const findings = useMemo(
-    () => findNcrItems(allVillaStatuses, constructionItemsTemplate),
-    [allVillaStatuses, constructionItemsTemplate]
+    () =>
+      rows.map((r) => ({
+        id: r.id,
+        villaID: r.villaID,
+        date: r.date,
+        note: r.note,
+        closed: r.closed,
+        closedDate: r.closedDate,
+        closingNote: r.closingNote,
+        item: itemsById.get(r.tableItemId) ?? { TableItemID: r.tableItemId, name: r.tableItemId },
+      })),
+    [rows, itemsById]
   );
 
   const filtered = useMemo(() => {
-    if (!villaFilter.trim()) return findings;
-    const needle = villaFilter.trim().toLowerCase();
-    return findings.filter((f) => f.villaID.toLowerCase().includes(needle));
-  }, [findings, villaFilter]);
+    let result = findings;
+    if (openOnly) result = result.filter((f) => !f.closed);
+    if (villaFilter.trim()) {
+      const needle = villaFilter.trim().toLowerCase();
+      result = result.filter((f) => f.villaID.toLowerCase().includes(needle));
+    }
+    if (zoneFilter || blockFilter) {
+      result = result.filter((f) => matchesZoneBlock(f.villaID, villaMetaByID, zoneFilter, blockFilter));
+    }
+    if (itemFilter) {
+      result = result.filter((f) => f.item.TableItemID === itemFilter);
+    }
+    if (dateFrom || dateTo) {
+      result = result.filter((f) => matchesDateRange(f.date, dateFrom, dateTo));
+    }
+    return result;
+  }, [findings, villaFilter, zoneFilter, blockFilter, itemFilter, dateFrom, dateTo, openOnly, villaMetaByID]);
 
   function handleExport() {
-    const rows = filtered.map((f) => ({
+    const exportRows = filtered.map((f) => ({
       Villa: f.villaID,
+      Zone: villaMetaByID[f.villaID]?.zonenum ?? "",
+      Block: villaMetaByID[f.villaID]?.blocknum ?? "",
       Item: f.item.name,
       "Item ID": f.item.TableItemID,
+      Date: f.date ?? "",
+      Reason: f.note ?? "",
+      Closed: f.closed ? "Yes" : "No",
+      "Closed Date": f.closedDate ?? "",
+      "Closing Reason": f.closingNote ?? "",
     }));
-    const sheet = XLSX.utils.json_to_sheet(rows);
+    const sheet = XLSX.utils.json_to_sheet(exportRows);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, sheet, "NCRs");
     XLSX.writeFile(wb, "ncr_report.xlsx");
   }
 
+  // Destructive, project-wide, no undo — double confirmation (the typed
+  // count is a real deterrent against a reflexive click, not just a
+  // second "are you sure").
+  async function handleClearAll() {
+    if (rows.length === 0) return;
+    const confirmed = window.confirm(
+      `This permanently deletes all ${rows.length} NCR${rows.length === 1 ? "" : "s"} across the ` +
+        `whole project (open and closed) — not just what's currently filtered/shown. This cannot be undone. Continue?`
+    );
+    if (!confirmed) return;
+    const typed = window.prompt(`Type the number ${rows.length} to confirm.`);
+    if (typed !== String(rows.length)) return;
+
+    setClearing(true);
+    try {
+      await villasApi.clearNcrReport();
+      loadReport();
+    } catch {
+      window.alert("Couldn't clear NCR data — please try again.");
+    } finally {
+      setClearing(false);
+    }
+  }
+
   const isLoading = status === "loading" || constructionItemsTemplate.length === 0;
+
+  const content = (
+    <>
+      <p className="file-status-hint">
+        Every NCR logged across the project — an item can have more than one.
+      </p>
+
+      {status === "error" && <p className="upload-error">Couldn't load the NCR report.</p>}
+
+      {isLoading ? (
+        <p className="file-status-hint">Loading…</p>
+      ) : (
+        <>
+          <div className="admin-actions" style={{ marginBottom: "0.5rem", alignItems: "center", flexWrap: "wrap", gap: "0.5rem" }}>
+            <input
+              type="text"
+              placeholder="Filter by villa (e.g. V_9)"
+              value={villaFilter}
+              onChange={(e) => setVillaFilter(e.target.value)}
+              style={{ flex: 1, minWidth: "140px", padding: "0.5rem", borderRadius: "6px", border: "1px solid var(--color-border-strong)" }}
+            />
+            <select value={zoneFilter} onChange={(e) => { setZoneFilter(e.target.value); setBlockFilter(""); }}>
+              <option value="">All zones</option>
+              {zoneOptions.map((z) => (
+                <option key={z} value={z}>Zone {z}</option>
+              ))}
+            </select>
+            <select value={blockFilter} onChange={(e) => setBlockFilter(e.target.value)}>
+              <option value="">All blocks</option>
+              {blockOptions.map((b) => (
+                <option key={b} value={b}>Block {b}</option>
+              ))}
+            </select>
+            <select value={itemFilter} onChange={(e) => setItemFilter(e.target.value)}>
+              <option value="">All items</option>
+              {constructionItemsTemplate.map((item) => (
+                <option key={item.TableItemID} value={item.TableItemID}>{item.name}</option>
+              ))}
+            </select>
+            <label className="file-status-hint" style={{ display: "flex", alignItems: "center", gap: "0.3rem" }}>
+              From <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+            </label>
+            <label className="file-status-hint" style={{ display: "flex", alignItems: "center", gap: "0.3rem" }}>
+              To <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+            </label>
+            <label style={{ display: "flex", alignItems: "center", gap: "0.3rem", whiteSpace: "nowrap" }}>
+              <input type="checkbox" checked={openOnly} onChange={(e) => setOpenOnly(e.target.checked)} />
+              Open only
+            </label>
+            <button type="button" className="admin-btn-secondary" onClick={handleExport} disabled={filtered.length === 0}>
+              Export to Excel
+            </button>
+            <button
+              type="button"
+              className="admin-btn-secondary"
+              style={{ color: "#dc2626", borderColor: "#dc2626" }}
+              onClick={handleClearAll}
+              disabled={rows.length === 0 || clearing}
+            >
+              {clearing ? "Clearing…" : "Clear all NCR data"}
+            </button>
+          </div>
+
+          <StatusCountChart items={filtered} getLabel={(f) => (f.closed ? "Closed" : "Open")} />
+
+          <p className="file-status-hint" style={{ marginTop: "0.5rem" }}>
+            {filtered.length} NCR{filtered.length === 1 ? "" : "s"} found
+            {villaFilter.trim() ? ` matching "${villaFilter.trim()}"` : ""}.
+          </p>
+
+          {filtered.length === 0 ? (
+            <p className="file-status-hint">
+              {openOnly ? "No open NCRs found." : "No NCRs found."}
+            </p>
+          ) : (
+            <div style={{ overflowX: "auto", maxHeight: "50vh", overflowY: "auto" }}>
+              <table className="dashboard-table">
+                <thead>
+                  <tr>
+                    <th>Villa</th>
+                    <th>Zone</th>
+                    <th>Block</th>
+                    <th>Item</th>
+                    <th>Date</th>
+                    <th>Reason</th>
+                    <th>Closed</th>
+                    <th>Closed Date</th>
+                    <th>Closing Reason</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((f) => (
+                    <tr key={f.id}>
+                      <td>{f.villaID}</td>
+                      <td>{villaMetaByID[f.villaID]?.zonenum ?? "—"}</td>
+                      <td>{villaMetaByID[f.villaID]?.blocknum ?? "—"}</td>
+                      <td>
+                        {f.item.name}
+                        <br />
+                        <span className="file-status-hint">{f.item.TableItemID}</span>
+                      </td>
+                      <td>{f.date ?? "—"}</td>
+                      <td>{f.note ?? "—"}</td>
+                      <td>{f.closed ? "Yes" : "No"}</td>
+                      <td>{f.closedDate ?? "—"}</td>
+                      <td>{f.closingNote ?? "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      )}
+    </>
+  );
+
+  if (embedded) return content;
 
   return (
     <div className="graph-modal-backdrop" onClick={onClose}>
@@ -54,61 +262,7 @@ export function NcrReport({ onClose }) {
             ×
           </button>
         </div>
-
-        <p className="file-status-hint">
-          Every (villa, item) across the project currently marked with status "NCR".
-        </p>
-
-        {isLoading ? (
-          <p className="file-status-hint">Loading…</p>
-        ) : (
-          <>
-            <div className="admin-actions" style={{ marginBottom: "0.75rem" }}>
-              <input
-                type="text"
-                placeholder="Filter by villa (e.g. V_9)"
-                value={villaFilter}
-                onChange={(e) => setVillaFilter(e.target.value)}
-                style={{ flex: 1, padding: "0.5rem", borderRadius: "6px", border: "1px solid var(--color-border-strong)" }}
-              />
-              <button type="button" className="admin-btn-secondary" onClick={handleExport} disabled={filtered.length === 0}>
-                Export to Excel
-              </button>
-            </div>
-
-            <p className="file-status-hint">
-              {filtered.length} NCR{filtered.length === 1 ? "" : "s"} found
-              {villaFilter.trim() ? ` matching "${villaFilter.trim()}"` : ""}.
-            </p>
-
-            {filtered.length === 0 ? (
-              <p className="file-status-hint">No NCRs found — nothing is currently marked NCR.</p>
-            ) : (
-              <div style={{ overflowX: "auto", maxHeight: "60vh", overflowY: "auto" }}>
-                <table className="dashboard-table">
-                  <thead>
-                    <tr>
-                      <th>Villa</th>
-                      <th>Item</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filtered.map((f) => (
-                      <tr key={`${f.villaID}-${f.item.TableItemID}`}>
-                        <td>{f.villaID}</td>
-                        <td>
-                          {f.item.name}
-                          <br />
-                          <span className="file-status-hint">{f.item.TableItemID}</span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </>
-        )}
+        {content}
       </div>
     </div>
   );

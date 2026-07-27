@@ -3,7 +3,6 @@ import L from "leaflet";
 import { MapContainer, useMap } from "react-leaflet";
 import { VillaLayer } from "./VillaLayer.jsx";
 import { BoundaryLayer } from "./BoundaryLayer.jsx";
-import { MapPanControl } from "./MapPanControl.jsx";
 import { MapItemColorControl } from "./MapItemColorControl.jsx";
 import { ProjectBranding } from "./ProjectBranding.jsx";
 import { MAP_DEFAULTS, GEOJSON_URL, BOUNDARY_GEOJSON_URL } from "../../config/mapConfig.js";
@@ -55,10 +54,10 @@ function HideLabelsOnZoom({ onZoomStart }) {
   return null;
 }
 
-// Highlighted block/zone label, positioned in screen pixels (like
-// MapPanControl) rather than as a Leaflet Marker/divIcon — needs the
-// block's on-screen pixel width every pan/zoom to size its own text, and
-// pixels are what that width naturally comes in.
+// Highlighted block/zone label, positioned in screen pixels rather than
+// as a Leaflet Marker/divIcon — needs the block's on-screen pixel width
+// every pan/zoom to size its own text, and pixels are what that width
+// naturally comes in.
 //
 // No pill/background anymore, and no decluttering that moves a label off
 // its own block — sized to fit within the block's own width instead, so
@@ -944,7 +943,6 @@ export const MapView = forwardRef(function MapView(
         <BoundaryLayer geojson={boundaryGeojson} visible={showBoundary || forceAllLabels} />
         <HighlightLabelsOverlay groups={highlightShowLabel ? highlightGroupLabels : []} />
         <FitToBounds geojson={geojson} />
-        <MapPanControl />
         <HideLabelsOnZoom onZoomStart={() => onLabelsEnabledChange?.(false)} />
       </MapContainer>
 
