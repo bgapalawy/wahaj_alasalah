@@ -8,13 +8,23 @@
  *
  * Condition shapes:
  *   { type: "itemStatus", statusSource: "actual" | "invoice",
- *     tableItemId, operator: "=" | "!=", value }
+ *     tableItemId, operator: "=" | "!=", value: string[] }
  *   { type: "villaAttribute", field: "zonenum"|"blocknum"|"villatype"|"villaID",
- *     operator: "=" | "!=", value }
- *   { type: "specialQuery", column, operator: "=" | "!=", value }
+ *     operator: "=" | "!=", value: string[] }
+ *   { type: "specialQuery", column, operator: "=" | "!=", value: string[] }
  *     — reads from the shams_elgroub_special_query table (the original app's
  *     actual custom-query data source), column chosen from whatever
  *     that table actually contains, not a fixed field list.
+ *
+ * `value` is now an array of one or more selected options (multi-select) —
+ * "=" matches when the actual value is ANY of the selected options
+ * ("Civil-1 is Completed OR NCR"), "!=" matches when it is NONE of them.
+ * An empty selection means "no filter chosen yet": "=" then matches
+ * nothing and "!=" matches everything, same as the old empty-string
+ * single-select behaved.
+ *
+ * `toArray` keeps this backward-compatible with any previously-saved
+ * conditions that still store `value` as a plain string.
  *
  * `context`:
  *   villaMetaByID        — {villaID: {zonenum, blocknum, villatype}} (from GeoJSON)
@@ -22,29 +32,40 @@
  *   allVillaInvoiceStatuses — {villaID: {TableItemID: invoiceStatus}}
  *   specialQueryByVilla  — {villaID: {column: value, ...}}
  */
+function toArray(value) {
+  if (Array.isArray(value)) return value;
+  if (value === undefined || value === null || value === "") return [];
+  return [value];
+}
+
 export function evaluateCustomQuery(conditions, context) {
   const { villaMetaByID, allVillaStatuses, allVillaInvoiceStatuses, specialQueryByVilla } = context;
   const villaIDs = Object.keys(villaMetaByID);
   if (!conditions || conditions.length === 0) return null; // no query active
 
   function evaluateCondition(condition, villaID) {
+    const selected = toArray(condition.value);
+
     if (condition.type === "itemStatus") {
       const source = condition.statusSource === "invoice" ? allVillaInvoiceStatuses : allVillaStatuses;
       const actual = source?.[villaID]?.[condition.tableItemId] ?? "NotStarted";
-      return condition.operator === "!=" ? actual !== condition.value : actual === condition.value;
+      const matches = selected.includes(actual);
+      return condition.operator === "!=" ? !matches : matches;
     }
     if (condition.type === "villaAttribute") {
       const meta = villaMetaByID[villaID] ?? {};
       const actual = condition.field === "villaID" ? villaID : meta[condition.field] ?? null;
-      return condition.operator === "!=" ? actual !== condition.value : actual === condition.value;
+      const matches = selected.includes(actual);
+      return condition.operator === "!=" ? !matches : matches;
     }
     if (condition.type === "specialQuery") {
       const row = specialQueryByVilla?.[villaID] ?? {};
       const actual = row[condition.column] ?? null;
       // Values from DynamoDB can come back as numbers where the UI's
-      // <select> always yields strings — compare loosely on string form
+      // picker always yields strings — compare loosely on string form
       // so "5" (from the picker) still matches a stored 5.
-      const matches = String(actual ?? "") === String(condition.value ?? "");
+      const selectedStrings = selected.map((v) => String(v));
+      const matches = selectedStrings.includes(String(actual ?? ""));
       return condition.operator === "!=" ? !matches : matches;
     }
     return false;

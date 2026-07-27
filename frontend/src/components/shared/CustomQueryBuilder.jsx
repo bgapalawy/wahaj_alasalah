@@ -3,6 +3,7 @@ import { constructionItemsApi } from "../../api/constructionItems.js";
 import { getCategory } from "../../utils/graphUtils.js";
 import { ITEM_STATUS_ORDER } from "../../config/itemStatusColors.js";
 import { INVOICE_STATUS_ORDER } from "../../config/scheduleInvoiceColors.js";
+import { MultiSelect } from "../dashboard/MultiSelect.jsx";
 
 const VILLA_ATTRIBUTE_FIELDS = [
   { value: "zonenum", label: "Zone" },
@@ -21,16 +22,21 @@ function makeCondition() {
     statusSource: "actual",
     field: "zonenum",
     operator: "=",
-    value: "",
+    value: [], // multi-select: array of chosen options, "=" matches any, "!=" matches none
   };
 }
 
 /**
  * Builds arbitrary AND/OR filter conditions across item status (actual
  * or invoice) and villa attributes (Zone/Block/Villa Type/Villa) —
- * e.g. "Civil-1 = Completed AND Block = 5". Shared between the map's
- * "Color map by item" control and the Project Dashboard's FilterBar;
- * evaluated by utils/customQueryUtils.evaluateCustomQuery.
+ * e.g. "Civil-1 = Completed OR NCR AND Block = 5". Shared between the
+ * map's "Color map by item" control and the Project Dashboard's
+ * FilterBar; evaluated by utils/customQueryUtils.evaluateCustomQuery.
+ *
+ * Each condition's value is a MULTI-select (checkbox dropdown, same
+ * component used elsewhere in the app) rather than a single option —
+ * "=" matches when the actual value is any of the selected options,
+ * "!=" matches when it's none of them.
  */
 export function CustomQueryBuilder({ conditions, onChange, villaMetaByID, specialQueryColumns = [], specialQueryValuesByColumn = {} }) {
   const [constructionItems, setConstructionItems] = useState([]);
@@ -93,7 +99,7 @@ export function CustomQueryBuilder({ conditions, onChange, villaMetaByID, specia
             onChange={(e) =>
               updateCondition(cond.id, {
                 type: e.target.value,
-                value: "",
+                value: [],
               })
             }
           >
@@ -116,28 +122,29 @@ export function CustomQueryBuilder({ conditions, onChange, villaMetaByID, specia
                   </optgroup>
                 ))}
               </select>
-              <select value={cond.statusSource} onChange={(e) => updateCondition(cond.id, { statusSource: e.target.value, value: "" })}>
+              <select
+                value={cond.statusSource}
+                onChange={(e) => updateCondition(cond.id, { statusSource: e.target.value, value: [] })}
+              >
                 <option value="actual">Status</option>
                 <option value="invoice">Invoice</option>
               </select>
               <select value={cond.operator} onChange={(e) => updateCondition(cond.id, { operator: e.target.value })}>
-                <option value="=">=</option>
-                <option value="!=">≠</option>
+                <option value="=">is any of</option>
+                <option value="!=">is none of</option>
               </select>
-              <select value={cond.value} onChange={(e) => updateCondition(cond.id, { value: e.target.value })}>
-                <option value="">— value —</option>
-                {(cond.statusSource === "invoice" ? INVOICE_STATUS_ORDER : ITEM_STATUS_ORDER).map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
-              </select>
+              <MultiSelect
+                label="Value"
+                options={cond.statusSource === "invoice" ? INVOICE_STATUS_ORDER : ITEM_STATUS_ORDER}
+                value={toArray(cond.value)}
+                onChange={(value) => updateCondition(cond.id, { value })}
+              />
             </>
           )}
 
           {cond.type === "specialQuery" && (
             <>
-              <select value={cond.column} onChange={(e) => updateCondition(cond.id, { column: e.target.value, value: "" })}>
+              <select value={cond.column} onChange={(e) => updateCondition(cond.id, { column: e.target.value, value: [] })}>
                 <option value="">— column —</option>
                 {specialQueryColumns.map((col) => (
                   <option key={col} value={col}>
@@ -146,23 +153,21 @@ export function CustomQueryBuilder({ conditions, onChange, villaMetaByID, specia
                 ))}
               </select>
               <select value={cond.operator} onChange={(e) => updateCondition(cond.id, { operator: e.target.value })}>
-                <option value="=">=</option>
-                <option value="!=">≠</option>
+                <option value="=">is any of</option>
+                <option value="!=">is none of</option>
               </select>
-              <select value={cond.value} onChange={(e) => updateCondition(cond.id, { value: e.target.value })} disabled={!cond.column}>
-                <option value="">— value —</option>
-                {(specialQueryValuesByColumn[cond.column] ?? []).map((v) => (
-                  <option key={v} value={v}>
-                    {v}
-                  </option>
-                ))}
-              </select>
+              <MultiSelect
+                label="Value"
+                options={specialQueryValuesByColumn[cond.column] ?? []}
+                value={toArray(cond.value)}
+                onChange={(value) => updateCondition(cond.id, { value })}
+              />
             </>
           )}
 
           {cond.type === "villaAttribute" && (
             <>
-              <select value={cond.field} onChange={(e) => updateCondition(cond.id, { field: e.target.value, value: "" })}>
+              <select value={cond.field} onChange={(e) => updateCondition(cond.id, { field: e.target.value, value: [] })}>
                 {VILLA_ATTRIBUTE_FIELDS.map((f) => (
                   <option key={f.value} value={f.value}>
                     {f.label}
@@ -170,17 +175,15 @@ export function CustomQueryBuilder({ conditions, onChange, villaMetaByID, specia
                 ))}
               </select>
               <select value={cond.operator} onChange={(e) => updateCondition(cond.id, { operator: e.target.value })}>
-                <option value="=">=</option>
-                <option value="!=">≠</option>
+                <option value="=">is any of</option>
+                <option value="!=">is none of</option>
               </select>
-              <select value={cond.value} onChange={(e) => updateCondition(cond.id, { value: e.target.value })}>
-                <option value="">— value —</option>
-                {(attributeOptions[cond.field] ?? []).map((v) => (
-                  <option key={v} value={v}>
-                    {v}
-                  </option>
-                ))}
-              </select>
+              <MultiSelect
+                label="Value"
+                options={attributeOptions[cond.field] ?? []}
+                value={toArray(cond.value)}
+                onChange={(value) => updateCondition(cond.id, { value })}
+              />
             </>
           )}
 
@@ -195,4 +198,12 @@ export function CustomQueryBuilder({ conditions, onChange, villaMetaByID, specia
       </button>
     </div>
   );
+}
+
+// Backward-compatible with any previously-saved condition whose value is
+// still a plain string (pre-multi-select) instead of an array.
+function toArray(value) {
+  if (Array.isArray(value)) return value;
+  if (value === undefined || value === null || value === "") return [];
+  return [value];
 }

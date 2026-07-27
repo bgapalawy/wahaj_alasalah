@@ -20,6 +20,9 @@ const ColorSettingsPanel = lazy(() =>
 const OutOfSequenceReport = lazy(() =>
   import("./components/dashboard/OutOfSequenceReport.jsx").then((m) => ({ default: m.OutOfSequenceReport }))
 );
+const NcrReport = lazy(() =>
+  import("./components/dashboard/NcrReport.jsx").then((m) => ({ default: m.NcrReport }))
+);
 
 export default function App() {
   const loggedInUser = useLoggedInUser();
@@ -30,6 +33,7 @@ export default function App() {
   const [showColorSettings, setShowColorSettings] = useState(false);
   const [labelsEnabled, setLabelsEnabled] = useState(false);
   const [showOutOfSequence, setShowOutOfSequence] = useState(false);
+  const [showNcrReport, setShowNcrReport] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
   const [selectingArea, setSelectingArea] = useState(false);
   // Lifted up from MapView so the villa panel can pre-select the same
@@ -161,6 +165,9 @@ export default function App() {
           <button type="button" className="header-dashboard-btn" onClick={() => setShowOutOfSequence(true)}>
             Out of Sequence
           </button>
+          <button type="button" className="header-dashboard-btn" onClick={() => setShowNcrReport(true)}>
+  NCRs
+</button>
           <button type="button" className="header-admin-btn" onClick={() => setShowAdmin(true)}>
             Admin
           </button>
@@ -219,6 +226,11 @@ export default function App() {
           <OutOfSequenceReport onClose={() => setShowOutOfSequence(false)} />
         </Suspense>
       )}
+      {showNcrReport && (
+  <Suspense fallback={null}>
+    <NcrReport onClose={() => setShowNcrReport(false)} />
+  </Suspense>
+)}
 
       {showAdmin && (
         <div className="graph-modal-backdrop" onClick={() => setShowAdmin(false)}>
