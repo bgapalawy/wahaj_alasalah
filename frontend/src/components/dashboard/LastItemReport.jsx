@@ -3,7 +3,7 @@ import * as XLSX from "xlsx";
 import { useAllVillaStatuses } from "../../hooks/useAllVillaStatuses.js";
 import { constructionItemsApi } from "../../api/constructionItems.js";
 import { useVillaGeoMeta } from "../../hooks/useVillaGeoMeta.js";
-import { getZoneOptions, getBlockOptions, getVillaTypeOptions, getVillaOptions, matchesGeoFilters, matchesMultiSelect } from "../../utils/qualityFilterUtils.js";
+import { getZoneOptions, getBlockOptions, getVillaTypeOptions, getVillaOptions, matchesGeoFilters, matchesMultiSelect, getRootCauseBlockers } from "../../utils/qualityFilterUtils.js";
 import { getVillaNumber } from "../../utils/dashboardUtils.js";
 import { StatusCountChart } from "./StatusCountChart.jsx";
 import { MultiSelectFilter } from "./MultiSelectFilter.jsx";
@@ -21,23 +21,25 @@ function getCategory(tableItemId) {
 }
 
 /**
- * For every real villa, finds its "current frontier" — but a villa's
- * construction items aren't one linear sequence, they're a dependency
- * GRAPH with several independent parallel paths (Civil, Mechanical,
- * Architectural, Electrical, Fence — see the dependency graph's own
- * "Category (border)" legend). Walking all 82 items in a single
- * item_id order and remembering the last Completed/InProgress hit (the
- * previous version of this report) collapses those parallel paths into
- * one, which is wrong: it reports whichever path happens to have the
- * highest-numbered item touched, not "where every path actually is."
- *
- * This version instead finds every item that's Completed/InProgress AND
- * has no Completed/InProgress SUCCESSOR (nothing that depends on it has
- * also progressed) — that's the true frontier of EACH independent path,
- * with duplicates impossible since it's a set of item ids, not a
- * repeated walk. A villa can have several such rows (one per active
- * path); a villa with nothing started yet still gets one "Not Started"
- * row, same as before.
+ * For every real villa, finds its "current frontier" by running the
+ * SAME recursive root-cause walk used everywhere else in this app for
+ * "why is this blocked" (getRootCauseBlockers, ported from
+ * findRootCauseBlockingActivities in graphUtils.js — see
+ * ScheduleStatusPanel.jsx and SchedulingReport.jsx) against the villa's
+ * own LAST construction item (the final one in item_id order — item 82
+ * of 82). That one call handles every case correctly on its own:
+ *   - the last item's own predecessor chain has real unresolved work
+ *     somewhere -> the root-cause walk returns those exact blocking
+ *     items, which ARE the frontier(s) — one per independent path
+ *     (Civil, Mechanical, Architectural, etc.), no separate
+ *     "successors" graph of our own needed.
+ *   - nothing is blocking the last item (every predecessor already
+ *     Completed) -> the walk returns nothing to block on, so the last
+ *     item ITSELF — whatever its own actual status is (ready to start,
+ *     in progress, or genuinely Completed if the whole villa is done)
+ *     — is "the last remaining item."
+ * Both cases fall out of one function call; no special-casing needed
+ * for "fully done" vs. "just this one task left."
  *
  * `embedded`, when true, renders just the content (no modal backdrop/
  * header) — used by QualityDashboard.jsx.
@@ -72,52 +74,40 @@ export function LastItemReport({ onClose, embedded = false }) {
     [villaMetaByID, zoneFilters, blockFilters, villaTypeFilters]
   );
 
-  // Inverted predecessors graph — for each item id, which OTHER items
-  // list it as a predecessor (its successors). Built once per template
-  // load, reused for every villa below.
-  const successorsByItemId = useMemo(() => {
-    const map = new Map();
-    constructionItemsTemplate.forEach((item) => {
-      (item.predecessors ?? []).forEach((predId) => {
-        if (!map.has(predId)) map.set(predId, []);
-        map.get(predId).push(item.id);
-      });
-    });
-    return map;
-  }, [constructionItemsTemplate]);
-
-  const itemById = useMemo(() => new Map(constructionItemsTemplate.map((i) => [i.id, i])), [constructionItemsTemplate]);
+  // The villa's actual final item — item_id 82 of 82 (or however many
+  // exist), the last one in constructionItemsApi.list()'s own order,
+  // which is already sorted by item_id server-side (same order the
+  // dependency chain and every other item list already use).
+  const lastItemOverall = constructionItemsTemplate[constructionItemsTemplate.length - 1] ?? null;
 
   const findings = useMemo(() => {
-    if (!allVillaStatuses || constructionItemsTemplate.length === 0) return [];
+    if (!allVillaStatuses || !lastItemOverall) return [];
     const results = [];
     Object.keys(villaMetaByID).forEach((villaID) => {
       const statusMap = allVillaStatuses[villaID] ?? {};
+      const blockers = getRootCauseBlockers(lastItemOverall, constructionItemsTemplate, statusMap);
 
-      const advancedIds = new Set();
-      constructionItemsTemplate.forEach((item) => {
-        const s = statusMap[item.TableItemID] ?? "NotStarted";
-        if (s === "Completed" || s === "InProgress") advancedIds.add(item.id);
-      });
-
-      if (advancedIds.size === 0) {
-        results.push({ villaID, item: null, itemStatus: "NotStarted" });
-        return;
+      if (blockers.length === 0) {
+        // Nothing blocking the last item — either it's genuinely
+        // Completed (whole villa done) or it's the one remaining task
+        // itself (ready/in progress) — either way, IT is the answer.
+        results.push({
+          villaID,
+          item: lastItemOverall,
+          itemStatus: statusMap[lastItemOverall.TableItemID] ?? "NotStarted",
+        });
+      } else {
+        blockers.forEach((b) => {
+          results.push({
+            villaID,
+            item: { TableItemID: b.TableItemID, name: b.name },
+            itemStatus: b.status ?? "NotStarted",
+          });
+        });
       }
-
-      // Frontier = advanced items with no advanced successor — the
-      // furthest point reached along each independent path.
-      advancedIds.forEach((id) => {
-        const successors = successorsByItemId.get(id) ?? [];
-        const hasAdvancedSuccessor = successors.some((succId) => advancedIds.has(succId));
-        if (hasAdvancedSuccessor) return;
-        const item = itemById.get(id);
-        if (!item) return;
-        results.push({ villaID, item, itemStatus: statusMap[item.TableItemID] ?? "NotStarted" });
-      });
     });
     return results;
-  }, [allVillaStatuses, constructionItemsTemplate, villaMetaByID, successorsByItemId, itemById]);
+  }, [allVillaStatuses, constructionItemsTemplate, lastItemOverall, villaMetaByID]);
 
   const filtered = useMemo(() => {
     return findings.filter((f) => {
