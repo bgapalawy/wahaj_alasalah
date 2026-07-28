@@ -15,7 +15,7 @@ import {
 import { Pie, Bar, Chart as MixedChart } from "react-chartjs-2";
 import * as XLSX from "xlsx";
 import { dashboardApi } from "../../api/dashboard.js";
-import { aggregateByPeriod, formatPeriodLabel, formatCurrency, downloadChartAsImage } from "../../utils/dashboardUtils.js";
+import { aggregateByPeriod, formatPeriodLabel, formatCurrency, downloadChartAsImage, varianceColor, spiColor, formatVariancePercent, formatSpi } from "../../utils/dashboardUtils.js";
 import { aggregateByCategory, aggregateTotalBudget, getTopItems, getFilteredDateSummary, formatSAR } from "../../utils/portfolioFilterUtils.js";
 import { INVOICE_STATUS_ORDER, SCHEDULE_STATUS_ORDER } from "../../config/scheduleInvoiceColors.js";
 import { computeScheduleStatusFast } from "../../utils/scheduleUtils.js";
@@ -639,6 +639,75 @@ export function AllProjectsDashboard() {
                     <div className="summary-card">
                       <span>Actual %</span>
                       <strong>{upToDateActualPercent.toFixed(1)}%</strong>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Variance = Actual − Planned. Positive means spending
+                    more than planned (shown red, "over"); negative means
+                    spending less than planned so far (shown green,
+                    "under") — a simple, common convention, not a
+                    judgment on whether that's actually good or bad in
+                    context (spending less can also mean behind
+                    schedule). Shown at both the Total scope and the
+                    date-adjusted "to date" scope, same split every other
+                    section on this tab already uses. */}
+                <div>
+                  <h4 style={{ fontSize: "0.85rem", color: "var(--color-text-muted)", margin: "0 0 0.5rem" }}>
+                    Variance (Actual − Planned)
+                  </h4>
+                  <div className="dashboard-summary-cards">
+                    <div className="summary-card">
+                      <span>Total Variance</span>
+                      <strong style={{ color: varianceColor(totalBudgetActual - totalBudgetPlanned) }}>
+                        {formatCurrency(totalBudgetActual - totalBudgetPlanned)}
+                      </strong>
+                    </div>
+                    <div className="summary-card">
+                      <span>Total Variance %</span>
+                      <strong style={{ color: varianceColor(totalBudgetActual - totalBudgetPlanned) }}>
+                        {formatVariancePercent(totalBudgetActual - totalBudgetPlanned, totalBudgetPlanned)}
+                      </strong>
+                    </div>
+                    <div className="summary-card">
+                      <span>Variance (to date)</span>
+                      <strong style={{ color: varianceColor(totalActualFiltered - totalPlannedFiltered) }}>
+                        {formatCurrency(totalActualFiltered - totalPlannedFiltered)}
+                      </strong>
+                    </div>
+                    <div className="summary-card">
+                      <span>Variance % (to date)</span>
+                      <strong style={{ color: varianceColor(totalActualFiltered - totalPlannedFiltered) }}>
+                        {formatVariancePercent(totalActualFiltered - totalPlannedFiltered, totalPlannedFiltered)}
+                      </strong>
+                    </div>
+                  </div>
+                </div>
+
+                {/* SPI here is Actual / Planned cost, as requested — not
+                    the textbook PMI definition (Earned Value / Planned
+                    Value), which this dataset doesn't track EV for
+                    separately. 1.00 = right on plan; above 1 = spent
+                    more than planned so far (red); below 1 = spent less
+                    (green) — same convention as Variance above, for the
+                    same reason (not necessarily good or bad on its own,
+                    just consistent with it). */}
+                <div>
+                  <h4 style={{ fontSize: "0.85rem", color: "var(--color-text-muted)", margin: "0 0 0.5rem" }}>
+                    SPI (Actual ÷ Planned)
+                  </h4>
+                  <div className="dashboard-summary-cards">
+                    <div className="summary-card">
+                      <span>Total SPI</span>
+                      <strong style={{ color: spiColor(totalBudgetPlanned > 0 ? totalBudgetActual / totalBudgetPlanned : 0) }}>
+                        {formatSpi(totalBudgetPlanned > 0 ? totalBudgetActual / totalBudgetPlanned : 0)}
+                      </strong>
+                    </div>
+                    <div className="summary-card">
+                      <span>SPI (to date)</span>
+                      <strong style={{ color: spiColor(totalPlannedFiltered > 0 ? totalActualFiltered / totalPlannedFiltered : 0) }}>
+                        {formatSpi(totalPlannedFiltered > 0 ? totalActualFiltered / totalPlannedFiltered : 0)}
+                      </strong>
                     </div>
                   </div>
                 </div>

@@ -42,7 +42,8 @@ export function FileStatusSection({ constructionItemId, constructionItemName, vi
       <h3>Files status</h3>
       {uploadLimits && (
         <p className="file-status-hint">
-          Allowed: {uploadLimits.extensions.map((e) => `.${e}`).join(", ")} — max {uploadLimits.maxSizeMB}MB per file
+          Images, documents, videos, and engineering files (CAD, BIM, GIS, schedules, Power BI) accepted — max{" "}
+          {uploadLimits.maxSizeMB}MB per file
         </p>
       )}
       <div className="status-tabs">

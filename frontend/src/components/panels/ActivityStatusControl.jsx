@@ -22,12 +22,13 @@ const today = () => new Date().toISOString().slice(0, 10);
  * villa_item_status_history (see activityStatusService.js) — the latter
  * is what powers the "View timeline" button below.
  *
- * While the item has any open NCR (see NcrList below), only "NCR" and
- * "Rejected" are selectable — every other status is locked out until
+ * "NCR" is never a manual choice in this dropdown — the only way an
+ * item's status becomes "NCR" is by actually adding one in the NcrList
+ * section below, which sets it automatically. While the item has any
+ * open NCR, only "NCR" (already set, can't be picked again) and
+ * "Rejected" remain available — every other status is locked out until
  * every open NCR is closed, so an item can't silently move on (or get
- * marked Completed) while an unresolved non-conformance sits against
- * it. Opening a new NCR also sets the status to "NCR" automatically —
- * no separate manual step needed in this dropdown.
+ * marked Completed) while an unresolved non-conformance sits against it.
  *
  * Matching the original app, also auto-marks the invoice "ReadyToPay"
  * when transitioning into Completed, and warns before un-completing an
@@ -51,6 +52,18 @@ export function ActivityStatusControl({ villaID, tableItemId, onSaved }) {
   // other status is locked until every open NCR is closed (see NcrList).
   function isStatusLocked(s) {
     return openNcrCount > 0 && s !== "NCR" && s !== "Rejected";
+  }
+
+  // NCR is never a manual choice in this dropdown, whether or not any
+  // NCR is currently open — the only way an item's status becomes "NCR"
+  // is by actually adding one below (see handleNcrAdded), which sets
+  // draftStatus directly and doesn't go through handleStatusChange at
+  // all. This keeps "status says NCR" and "there's a real NCR record"
+  // from ever drifting apart — no picking NCR from the list without one
+  // actually existing, and no way to remove the status without going
+  // through NcrList's own close flow either.
+  function isManuallySelectable(s) {
+    return s !== "NCR" && !isStatusLocked(s);
   }
 
   // Called by NcrList right after a new NCR is successfully added — the
@@ -105,7 +118,7 @@ export function ActivityStatusControl({ villaID, tableItemId, onSaved }) {
   // saving); switching AWAY from a notes-taking status clears the note
   // so a stale one can't accidentally get saved under a different status.
   function handleStatusChange(nextStatus) {
-    if (isStatusLocked(nextStatus)) {
+    if (!isManuallySelectable(nextStatus)) {
       // Belt and suspenders — the <option> below is already disabled in
       // this case, so this really only matters if it's reached some
       // other way, but it keeps this function correct on its own too.
@@ -230,8 +243,12 @@ export function ActivityStatusControl({ villaID, tableItemId, onSaved }) {
       <div className="activity-status-form">
         <select value={draftStatus} onChange={(e) => handleStatusChange(e.target.value)}>
           {STATUS_OPTIONS.map((s) => (
-            <option key={s} value={s} disabled={isStatusLocked(s)}>
-              {isStatusLocked(s) ? `${s} (close open NCRs first)` : s}
+            <option key={s} value={s} disabled={!isManuallySelectable(s)}>
+              {s === "NCR"
+                ? "NCR (add one below, doesn't set by hand)"
+                : isStatusLocked(s)
+                  ? `${s} (close open NCRs first)`
+                  : s}
             </option>
           ))}
         </select>

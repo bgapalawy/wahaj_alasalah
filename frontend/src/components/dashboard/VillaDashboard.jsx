@@ -22,6 +22,10 @@ import {
   formatPeriodLabel,
   downloadChartAsImage,
   getProjectDateRange,
+  varianceColor,
+  spiColor,
+  formatVariancePercent,
+  formatSpi,
 } from "../../utils/dashboardUtils.js";
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, ArcElement, Tooltip, Legend,LineController,
@@ -218,6 +222,68 @@ export function VillaDashboard({ villaID }) {
           <div className="summary-card">
             <span>Actual %</span>
             <strong>{metrics.actualPercent.toFixed(1)}%</strong>
+          </div>
+        </div>
+      </div>
+
+      {/* Variance = Actual − Planned. Positive means spending more than
+          planned (shown red, "over"); negative means spending less than
+          planned so far (shown green, "under") — a simple, common
+          convention, not a judgment on whether that's actually good or
+          bad in context (spending less can also mean behind schedule). */}
+      <div>
+        <h4 style={{ fontSize: "0.85rem", color: "var(--color-text-muted)", margin: "0 0 0.5rem" }}>
+          Variance (Actual − Planned)
+        </h4>
+        <div className="dashboard-summary-cards">
+          <div className="summary-card">
+            <span>Total Variance</span>
+            <strong style={{ color: varianceColor(metrics.totalActual - metrics.grandTotal) }}>
+              {formatCurrency(metrics.totalActual - metrics.grandTotal)}
+            </strong>
+          </div>
+          <div className="summary-card">
+            <span>Total Variance %</span>
+            <strong style={{ color: varianceColor(metrics.totalActual - metrics.grandTotal) }}>
+              {formatVariancePercent(metrics.totalActual - metrics.grandTotal, metrics.grandTotal)}
+            </strong>
+          </div>
+          <div className="summary-card">
+            <span>Variance (to date)</span>
+            <strong style={{ color: varianceColor(metrics.actualCostToDate - metrics.plannedCostToDate) }}>
+              {formatCurrency(metrics.actualCostToDate - metrics.plannedCostToDate)}
+            </strong>
+          </div>
+          <div className="summary-card">
+            <span>Variance % (to date)</span>
+            <strong style={{ color: varianceColor(metrics.actualCostToDate - metrics.plannedCostToDate) }}>
+              {formatVariancePercent(metrics.actualCostToDate - metrics.plannedCostToDate, metrics.plannedCostToDate)}
+            </strong>
+          </div>
+        </div>
+      </div>
+
+      {/* SPI here is Actual / Planned cost, as requested — not the
+          textbook PMI definition (Earned Value / Planned Value), which
+          this data doesn't track EV for separately. 1.00 = right on
+          plan; above 1 = spent more than planned so far (red); below 1
+          = spent less (green) — same convention as Variance above. */}
+      <div>
+        <h4 style={{ fontSize: "0.85rem", color: "var(--color-text-muted)", margin: "0 0 0.5rem" }}>
+          SPI (Actual ÷ Planned)
+        </h4>
+        <div className="dashboard-summary-cards">
+          <div className="summary-card">
+            <span>Total SPI</span>
+            <strong style={{ color: spiColor(metrics.grandTotal > 0 ? metrics.totalActual / metrics.grandTotal : 0) }}>
+              {formatSpi(metrics.grandTotal > 0 ? metrics.totalActual / metrics.grandTotal : 0)}
+            </strong>
+          </div>
+          <div className="summary-card">
+            <span>SPI (to date)</span>
+            <strong style={{ color: spiColor(metrics.plannedCostToDate > 0 ? metrics.actualCostToDate / metrics.plannedCostToDate : 0) }}>
+              {formatSpi(metrics.plannedCostToDate > 0 ? metrics.actualCostToDate / metrics.plannedCostToDate : 0)}
+            </strong>
           </div>
         </div>
       </div>
