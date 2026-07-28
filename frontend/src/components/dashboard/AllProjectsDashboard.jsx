@@ -15,7 +15,7 @@ import {
 import { Pie, Bar, Chart as MixedChart } from "react-chartjs-2";
 import * as XLSX from "xlsx";
 import { dashboardApi } from "../../api/dashboard.js";
-import { aggregateByPeriod, formatPeriodLabel, formatCurrency, downloadChartAsImage, varianceColor, spiColor, formatVariancePercent, formatSpi } from "../../utils/dashboardUtils.js";
+import { aggregateByPeriod, formatPeriodLabel, formatCurrency, downloadChartAsImage, varianceColor, spiColor, formatVariancePercent, formatSpi, getVillaNumber } from "../../utils/dashboardUtils.js";
 import { aggregateByCategory, aggregateTotalBudget, getTopItems, getFilteredDateSummary, formatSAR } from "../../utils/portfolioFilterUtils.js";
 import { INVOICE_STATUS_ORDER, SCHEDULE_STATUS_ORDER } from "../../config/scheduleInvoiceColors.js";
 import { computeScheduleStatusFast } from "../../utils/scheduleUtils.js";
@@ -391,6 +391,7 @@ export function AllProjectsDashboard() {
   function tableRowsForExport(rows) {
     return rows.map((r) => ({
       Villa: r.villaID,
+      "Villa Number": getVillaNumber(r.villaID),
       Block: r.blocknum ?? "—",
       Zone: r.zonenum ?? "—",
       "Villa Type": r.villatype ?? "—",

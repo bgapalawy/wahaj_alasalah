@@ -79,6 +79,11 @@ export function FileUploadSlot({ prefix, friendlyNameBase, uploadLimits }) {
       const putResponse = await uploadsApi.putToS3(url, selected);
       if (!putResponse.ok) throw new Error("Upload to storage failed");
 
+      // Logging this is best-effort — the upload itself already
+      // succeeded above, so a failure here shouldn't surface as an
+      // upload error to the user.
+      uploadsApi.confirmUpload(prefix, selected.name).catch(() => {});
+
       const previewUrl = URL.createObjectURL(selected);
       setFile({ key, extension: selected.name.split(".").pop().toLowerCase(), previewUrl });
       setStatus("ready");

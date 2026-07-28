@@ -26,6 +26,9 @@ export const villasApi = {
   // Every (villa, item) that has ever had a status recorded — feeds the
   // "Villa Status" tab of the Quality dashboard.
   getStatusReport: () => apiClient.get(`/villas/status-report`),
+  // Every audit log entry, most recent first — feeds the "History" tab
+  // of the Quality dashboard.
+  getAuditLog: () => apiClient.get(`/villas/audit-log`),
   // Wipes every NCR across the project — destructive, no undo. NcrReport.jsx confirms with the user first.
   clearNcrReport: () => apiClient.delete(`/villas/ncr-report`),
 
@@ -43,6 +46,18 @@ export const villasApi = {
       note,
       openedDate,
     }),
+
+  // Dated remarks against one villa/item's computed schedule status
+  // (e.g. "procurement issue") — independent of NCRs and the main
+  // activity status.
+  getScheduleNotes: (villaID, tableItemId) =>
+    apiClient.get(`/villas/${villaID}/activities/${encodeURIComponent(tableItemId)}/schedule-notes`),
+  addScheduleNote: (villaID, tableItemId, { noteDate, note }) =>
+    apiClient.post(`/villas/${villaID}/activities/${encodeURIComponent(tableItemId)}/schedule-notes`, { noteDate, note }),
+  // Every schedule note across the project, joined with each row's
+  // planned start + current actual status — feeds the "Scheduling" tab
+  // of the Quality dashboard.
+  getScheduleNotesReport: () => apiClient.get(`/villas/schedule-notes-report`),
 
   getInvoiceStatus: (villaID, tableItemId) =>
     apiClient.get(`/villas/${villaID}/invoices/${encodeURIComponent(tableItemId)}`),

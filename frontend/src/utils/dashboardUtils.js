@@ -156,6 +156,56 @@ export const formatCurrency = (n) =>
   (n ?? 0).toLocaleString("en-US", { style: "currency", currency: "SAR", minimumFractionDigits: 0 });
 
 /**
+ * "V_5" -> "5" — the plain numeric villa number, same leading-non-digit
+ * strip VillaLayer.jsx already uses for map labels. Every Excel export
+ * that has a Villa (villaID) column also gets this alongside it, so a
+ * downloaded sheet can be sorted/filtered by the plain number without
+ * needing to parse "V_5" back apart in Excel.
+ */
+export function getVillaNumber(villaID) {
+  return String(villaID ?? "").replace(/^\D+/, "");
+}
+
+/**
+ * "2026-07-28" -> a real JS Date (midnight local) for a plain date
+ * value, or an ISO timestamp string -> a real JS Date for a
+ * date+time value. Returns null for anything empty/unparseable so a
+ * missing date exports as a blank cell, not "Invalid Date" text.
+ *
+ * Excel export date handling, the AdminImportExport.jsx pattern applied
+ * everywhere else: `XLSX.utils.json_to_sheet` only writes a real,
+ * sortable/filterable Excel date cell when the value is an actual JS
+ * Date object AND `{ cellDates: true }` is passed — a formatted STRING
+ * like "Jul 28, 2026, 3:05 PM" (what every Quality export used to
+ * write) looks fine on screen but Excel treats it as plain text: no
+ * date-aware sort, no date filter dropdown, no re-formatting. Convert
+ * with `toExcelDate`, pass `{ cellDates: true }` to json_to_sheet, then
+ * call `applyDateCellFormat` on the resulting worksheet so those cells
+ * also get a real display format instead of Excel's raw default.
+ */
+export function toExcelDate(value) {
+  if (!value) return null;
+  const d = /^\d{4}-\d{2}-\d{2}$/.test(value) ? new Date(`${value}T00:00:00`) : new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/**
+ * Sets a display format on every real date cell (XLSX marks these with
+ * cell.t === "d") in a worksheet — json_to_sheet writes the underlying
+ * date value correctly with `cellDates: true`, but doesn't set a
+ * display format on its own, so cells would otherwise show as raw
+ * serial numbers. `format` — "yyyy-mm-dd" for plain dates,
+ * "yyyy-mm-dd hh:mm" for date+time columns.
+ */
+export function applyDateCellFormat(worksheet, format = "yyyy-mm-dd") {
+  for (const cellRef of Object.keys(worksheet)) {
+    if (cellRef.startsWith("!")) continue;
+    const cell = worksheet[cellRef];
+    if (cell?.t === "d") cell.z = format;
+  }
+}
+
+/**
  * Variance/SPI formatting — shared by AllProjectsDashboard.jsx,
  * VillaDashboard.jsx, and ConstructionItemDashboard.jsx, each of which
  * used to keep its own copy of these four (moved here once this file's

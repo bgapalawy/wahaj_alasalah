@@ -5,6 +5,7 @@ import { constructionItemsApi } from "../../api/constructionItems.js";
 import { villasApi } from "../../api/villas.js";
 import { MultiSelect } from "../dashboard/MultiSelect.jsx";
 import { useSpecialQueryData } from "../../hooks/useSpecialQueryData.js";
+import { getVillaNumber } from "../../utils/dashboardUtils.js";
 
 /**
  * Ports the original app's uploadingtodatabasefromexcel.js. That version
@@ -49,10 +50,32 @@ export function AdminImportExport() {
     villasApi.list().then(setAllVillas).catch(() => setAllVillas([]));
   }, []);
 
-  const allVillaIDs = allVillas.map((v) => v.villaID);
+  // Zone > Block > Villa Type > Villa — same cascade the Quality
+  // dashboard's filters use (qualityFilterUtils.js): each level's
+  // option list narrows based on whatever's selected above it.
   const distinctZones = [...new Set(allVillas.map((v) => v.zonenum).filter(Boolean))].sort();
-  const distinctBlocks = [...new Set(allVillas.map((v) => v.blocknum).filter(Boolean))].sort();
-  const distinctVillaTypes = [...new Set(allVillas.map((v) => v.villatype).filter(Boolean))].sort();
+  const distinctBlocks = [
+    ...new Set(
+      allVillas
+        .filter((v) => zoneFilter.length === 0 || zoneFilter.includes(v.zonenum))
+        .map((v) => v.blocknum)
+        .filter(Boolean)
+    ),
+  ].sort();
+  const distinctVillaTypes = [
+    ...new Set(
+      allVillas
+        .filter((v) => zoneFilter.length === 0 || zoneFilter.includes(v.zonenum))
+        .filter((v) => blockFilter.length === 0 || blockFilter.includes(v.blocknum))
+        .map((v) => v.villatype)
+        .filter(Boolean)
+    ),
+  ].sort();
+  const allVillaIDs = allVillas
+    .filter((v) => zoneFilter.length === 0 || zoneFilter.includes(v.zonenum))
+    .filter((v) => blockFilter.length === 0 || blockFilter.includes(v.blocknum))
+    .filter((v) => villaTypeFilter.length === 0 || villaTypeFilter.includes(v.villatype))
+    .map((v) => v.villaID);
   const villaMetaByID = new Map(allVillas.map((v) => [v.villaID, v]));
 
   const selectedTableMeta = tableOptions.find((t) => t.value === selectedTable);
@@ -184,23 +207,27 @@ export function AdminImportExport() {
 
         // Zone/Block/Villa Type are reference-only columns (villa
         // attributes, not per-item data) — inserted right after villaID,
-        // before the real item columns.
-        const headerRow = ["villaID", "Zone", "Block", "Villa Type", ...orderedColumns];
-        const englishNameRow = ["English Name", "", "", "", ...orderedColumns.map((id) => nameById.get(id)?.name ?? "")];
-        const arabicNameRow = ["Arabic Name", "", "", "", ...orderedColumns.map((id) => nameById.get(id)?.nameArabic ?? "")];
+        // before the real item columns. "Villa Number" (the plain
+        // numeric part of villaID, e.g. "V_5" -> "5") sits right next
+        // to villaID itself, same convention as every other downloaded
+        // sheet in the app now uses.
+        const headerRow = ["villaID", "Villa Number", "Zone", "Block", "Villa Type", ...orderedColumns];
+        const englishNameRow = ["English Name", "", "", "", "", ...orderedColumns.map((id) => nameById.get(id)?.name ?? "")];
+        const arabicNameRow = ["Arabic Name", "", "", "", "", ...orderedColumns.map((id) => nameById.get(id)?.nameArabic ?? "")];
         const dataRows = rows.map((row) => [
           row.villaID,
+          getVillaNumber(row.villaID),
           ...villaMetaRow(row.villaID),
           ...orderedColumns.map((id) => cellValue(row[id])),
         ]);
 
         worksheet = XLSX.utils.aoa_to_sheet([headerRow, englishNameRow, arabicNameRow, ...dataRows], { cellDates: true });
-        worksheet["!freeze"] = { xSplit: 1, ySplit: 3 }; // keep villaID column + the 3 header rows visible while scrolling
+        worksheet["!freeze"] = { xSplit: 2, ySplit: 3 }; // keep villaID + Villa Number columns + the 3 header rows visible while scrolling
       } else {
         const columnFilterSet = new Set(specialQueryColumnFilter);
         const preparedRows = rows.map((row) => {
           const [zone, block, villaType] = villaMetaRow(row.villaID);
-          const converted = { villaID: row.villaID, Zone: zone, Block: block, "Villa Type": villaType };
+          const converted = { villaID: row.villaID, "Villa Number": getVillaNumber(row.villaID), Zone: zone, Block: block, "Villa Type": villaType };
           for (const [key, value] of Object.entries(row)) {
             if (key === "villaID") continue;
             if (selectedTable === "specialQuery" && columnFilterSet.size > 0 && !columnFilterSet.has(key)) continue;
@@ -352,10 +379,27 @@ export function AdminImportExport() {
           <div className="admin-field">
             <label>Filter what gets downloaded (optional — leave blank for everything)</label>
             <div className="admin-filter-grid">
-              <MultiSelect label="Villas" options={allVillaIDs} value={villaFilter} onChange={setVillaFilter} />
-              <MultiSelect label="Zone" options={distinctZones} value={zoneFilter} onChange={setZoneFilter} />
-              <MultiSelect label="Block" options={distinctBlocks} value={blockFilter} onChange={setBlockFilter} />
+              <MultiSelect
+                label="Zone"
+                options={distinctZones}
+                value={zoneFilter}
+                onChange={(next) => {
+                  setZoneFilter(next);
+                  setBlockFilter([]);
+                  setVillaTypeFilter([]);
+                }}
+              />
+              <MultiSelect
+                label="Block"
+                options={distinctBlocks}
+                value={blockFilter}
+                onChange={(next) => {
+                  setBlockFilter(next);
+                  setVillaTypeFilter([]);
+                }}
+              />
               <MultiSelect label="Villa Type" options={distinctVillaTypes} value={villaTypeFilter} onChange={setVillaTypeFilter} />
+              <MultiSelect label="Villas" options={allVillaIDs} value={villaFilter} onChange={setVillaFilter} />
               {selectedTable !== "specialQuery" && (
                 <MultiSelect
                   label="Construction Items"

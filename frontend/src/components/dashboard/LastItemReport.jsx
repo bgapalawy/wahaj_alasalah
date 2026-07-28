@@ -2,28 +2,47 @@ import { useEffect, useMemo, useState } from "react";
 import * as XLSX from "xlsx";
 import { useAllVillaStatuses } from "../../hooks/useAllVillaStatuses.js";
 import { constructionItemsApi } from "../../api/constructionItems.js";
-import { findOutOfSequenceItems } from "../../utils/outOfSequenceUtils.js";
 import { useVillaGeoMeta } from "../../hooks/useVillaGeoMeta.js";
 import { getZoneOptions, getBlockOptions, getVillaTypeOptions, getVillaOptions, matchesGeoFilters, matchesMultiSelect } from "../../utils/qualityFilterUtils.js";
 import { getVillaNumber } from "../../utils/dashboardUtils.js";
 import { StatusCountChart } from "./StatusCountChart.jsx";
 import { MultiSelectFilter } from "./MultiSelectFilter.jsx";
 
+const STATUS_OPTIONS = [
+  { value: "Completed", label: "Completed" },
+  { value: "InProgress", label: "In Progress" },
+  { value: "NotStarted", label: "Not Started" },
+];
+
+/** Same one-liner graphUtils.js's own getCategory uses ("Civil-15" -> "Civil") — not imported since that file lives on the backend, this is trivial enough to duplicate. */
+function getCategory(tableItemId) {
+  if (!tableItemId || typeof tableItemId !== "string") return "—";
+  return tableItemId.split("-")[0] || "—";
+}
+
 /**
- * Surfaces every (villa, item) where an item is marked Completed while
- * at least one of its OWN predecessors isn't — a real scheduling
- * anomaly, distinct from the existing "blocked" status (which only ever
- * applies to NotStarted items waiting their turn, see scheduleUtils.js).
+ * For every real villa, finds its "current frontier" — but a villa's
+ * construction items aren't one linear sequence, they're a dependency
+ * GRAPH with several independent parallel paths (Civil, Mechanical,
+ * Architectural, Electrical, Fence — see the dependency graph's own
+ * "Category (border)" legend). Walking all 82 items in a single
+ * item_id order and remembering the last Completed/InProgress hit (the
+ * previous version of this report) collapses those parallel paths into
+ * one, which is wrong: it reports whichever path happens to have the
+ * highest-numbered item touched, not "where every path actually is."
  *
- * Data-wise this rides on useAllVillaStatuses, the same hook already
- * used by Schedule coloring mode — no new backend endpoint needed for
- * something this cheap to compute once the data's in memory client-side.
+ * This version instead finds every item that's Completed/InProgress AND
+ * has no Completed/InProgress SUCCESSOR (nothing that depends on it has
+ * also progressed) — that's the true frontier of EACH independent path,
+ * with duplicates impossible since it's a set of item ids, not a
+ * repeated walk. A villa can have several such rows (one per active
+ * path); a villa with nothing started yet still gets one "Not Started"
+ * row, same as before.
  *
  * `embedded`, when true, renders just the content (no modal backdrop/
- * header) — used by QualityDashboard.jsx, which supplies its own single
- * shared modal shell around all three Quality tabs.
+ * header) — used by QualityDashboard.jsx.
  */
-export function OutOfSequenceReport({ onClose, embedded = false }) {
+export function LastItemReport({ onClose, embedded = false }) {
   const { data: allVillaStatuses, status } = useAllVillaStatuses(true);
   const [constructionItemsTemplate, setConstructionItemsTemplate] = useState([]);
   const { villaMetaByID } = useVillaGeoMeta();
@@ -33,21 +52,11 @@ export function OutOfSequenceReport({ onClose, embedded = false }) {
   const [blockFilters, setBlockFilters] = useState([]);
   const [villaTypeFilters, setVillaTypeFilters] = useState([]);
   const [itemFilter, setItemFilter] = useState("");
-  // "Status" here filters by the STATUS OF THE INCOMPLETE PREDECESSOR(S)
-  // causing the anomaly (e.g. "only show rows blocked by an NCR
-  // predecessor") — there's no single top-level status on an
-  // out-of-sequence finding itself (the completed item is always just
-  // "Completed"), so this is the meaningful equivalent here.
   const [statusFilters, setStatusFilters] = useState([]);
 
   useEffect(() => {
     constructionItemsApi.list().then(setConstructionItemsTemplate).catch(() => setConstructionItemsTemplate([]));
   }, []);
-
-  const findings = useMemo(
-    () => findOutOfSequenceItems(allVillaStatuses, constructionItemsTemplate),
-    [allVillaStatuses, constructionItemsTemplate]
-  );
 
   const zoneOptions = useMemo(() => getZoneOptions(villaMetaByID).map((z) => ({ value: z, label: `Zone ${z}` })), [villaMetaByID]);
   const blockOptions = useMemo(
@@ -62,38 +71,80 @@ export function OutOfSequenceReport({ onClose, embedded = false }) {
     () => getVillaOptions(villaMetaByID, zoneFilters, blockFilters, villaTypeFilters).map((v) => ({ value: v, label: v })),
     [villaMetaByID, zoneFilters, blockFilters, villaTypeFilters]
   );
-  const statusOptions = useMemo(() => {
-    const seen = new Set();
-    findings.forEach((f) => f.incompletePredecessors.forEach((p) => seen.add(p.status)));
-    return [...seen].sort().map((s) => ({ value: s, label: s }));
-  }, [findings]);
+
+  // Inverted predecessors graph — for each item id, which OTHER items
+  // list it as a predecessor (its successors). Built once per template
+  // load, reused for every villa below.
+  const successorsByItemId = useMemo(() => {
+    const map = new Map();
+    constructionItemsTemplate.forEach((item) => {
+      (item.predecessors ?? []).forEach((predId) => {
+        if (!map.has(predId)) map.set(predId, []);
+        map.get(predId).push(item.id);
+      });
+    });
+    return map;
+  }, [constructionItemsTemplate]);
+
+  const itemById = useMemo(() => new Map(constructionItemsTemplate.map((i) => [i.id, i])), [constructionItemsTemplate]);
+
+  const findings = useMemo(() => {
+    if (!allVillaStatuses || constructionItemsTemplate.length === 0) return [];
+    const results = [];
+    Object.keys(villaMetaByID).forEach((villaID) => {
+      const statusMap = allVillaStatuses[villaID] ?? {};
+
+      const advancedIds = new Set();
+      constructionItemsTemplate.forEach((item) => {
+        const s = statusMap[item.TableItemID] ?? "NotStarted";
+        if (s === "Completed" || s === "InProgress") advancedIds.add(item.id);
+      });
+
+      if (advancedIds.size === 0) {
+        results.push({ villaID, item: null, itemStatus: "NotStarted" });
+        return;
+      }
+
+      // Frontier = advanced items with no advanced successor — the
+      // furthest point reached along each independent path.
+      advancedIds.forEach((id) => {
+        const successors = successorsByItemId.get(id) ?? [];
+        const hasAdvancedSuccessor = successors.some((succId) => advancedIds.has(succId));
+        if (hasAdvancedSuccessor) return;
+        const item = itemById.get(id);
+        if (!item) return;
+        results.push({ villaID, item, itemStatus: statusMap[item.TableItemID] ?? "NotStarted" });
+      });
+    });
+    return results;
+  }, [allVillaStatuses, constructionItemsTemplate, villaMetaByID, successorsByItemId, itemById]);
 
   const filtered = useMemo(() => {
     return findings.filter((f) => {
       if (!matchesMultiSelect(f.villaID, villaFilters)) return false;
       if (!matchesGeoFilters(f.villaID, villaMetaByID, zoneFilters, blockFilters, villaTypeFilters)) return false;
-      if (itemFilter && f.item.TableItemID !== itemFilter) return false;
-      if (statusFilters.length > 0 && !f.incompletePredecessors.some((p) => statusFilters.includes(p.status))) return false;
+      if (itemFilter && f.item?.TableItemID !== itemFilter) return false;
+      if (!matchesMultiSelect(f.itemStatus, statusFilters)) return false;
       return true;
     });
   }, [findings, villaFilters, zoneFilters, blockFilters, villaTypeFilters, itemFilter, statusFilters, villaMetaByID]);
 
   function handleExport() {
-    const rows = filtered.map((f) => ({
+    const exportRows = filtered.map((f) => ({
       Villa: f.villaID,
       "Villa Number": getVillaNumber(f.villaID),
       Zone: villaMetaByID[f.villaID]?.zonenum ?? "",
       Block: villaMetaByID[f.villaID]?.blocknum ?? "",
       "Villa Type": villaMetaByID[f.villaID]?.villatype ?? "",
-      "Completed Item": f.item.name,
-      "Completed Item ID": f.item.TableItemID,
-      "Incomplete Predecessor(s)": f.incompletePredecessors.map((p) => `${p.name} (${p.status})`).join("; "),
-      "Incomplete Predecessor Count": f.incompletePredecessors.length,
+      "Last Item": f.item?.name ?? "— (Not Started)",
+      "Item ID": f.item?.TableItemID ?? "",
+      Category: f.item ? getCategory(f.item.TableItemID) : "",
+      Status: f.itemStatus,
     }));
-    const sheet = XLSX.utils.json_to_sheet(rows);
+    const sheet = XLSX.utils.json_to_sheet(exportRows);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, sheet, "Out of Sequence");
-    XLSX.writeFile(wb, "out_of_sequence_report.xlsx");
+    XLSX.utils.book_append_sheet(wb, sheet, "Last Item");
+    XLSX.writeFile(wb, "last_item_report.xlsx");
   }
 
   const isLoading = status === "loading" || constructionItemsTemplate.length === 0;
@@ -101,8 +152,9 @@ export function OutOfSequenceReport({ onClose, embedded = false }) {
   const content = (
     <>
       <p className="file-status-hint">
-        Items marked Completed while at least one of their own predecessors isn't — a real scheduling
-        anomaly, not the same thing as a "blocked" (not-yet-started) item.
+        Every villa's current frontier along EACH of its independent construction paths (Civil, Mechanical,
+        Architectural, etc.) — a villa with several trades progressing in parallel shows one row per path, not just
+        one overall "last" item.
       </p>
 
       {isLoading ? (
@@ -132,30 +184,26 @@ export function OutOfSequenceReport({ onClose, embedded = false }) {
             <MultiSelectFilter label="Villa Types" options={villaTypeOptions} selected={villaTypeFilters} onChange={setVillaTypeFilters} />
             <MultiSelectFilter label="Villas" options={villaOptions} selected={villaFilters} onChange={setVillaFilters} searchable />
             <select value={itemFilter} onChange={(e) => setItemFilter(e.target.value)}>
-              <option value="">All items</option>
+              <option value="">All last items</option>
               {constructionItemsTemplate.map((item) => (
                 <option key={item.TableItemID} value={item.TableItemID}>{item.name}</option>
               ))}
             </select>
-            <MultiSelectFilter
-              label="Predecessor status"
-              options={statusOptions}
-              selected={statusFilters}
-              onChange={setStatusFilters}
-            />
+            <MultiSelectFilter label="Status" options={STATUS_OPTIONS} selected={statusFilters} onChange={setStatusFilters} />
             <button type="button" className="admin-btn-secondary" onClick={handleExport} disabled={filtered.length === 0}>
               Export to Excel
             </button>
           </div>
 
-          <StatusCountChart items={filtered} getLabel={(f) => f.item.name} />
+          <StatusCountChart items={filtered} getLabel={(f) => f.itemStatus} />
 
           <p className="file-status-hint" style={{ marginTop: "0.5rem" }}>
-            {filtered.length} out-of-sequence item{filtered.length === 1 ? "" : "s"} found.
+            {filtered.length} row{filtered.length === 1 ? "" : "s"} found ({new Set(filtered.map((f) => f.villaID)).size} villa
+            {new Set(filtered.map((f) => f.villaID)).size === 1 ? "" : "s"}).
           </p>
 
           {filtered.length === 0 ? (
-            <p className="file-status-hint">No out-of-sequence items match the current filters.</p>
+            <p className="file-status-hint">No villas match the current filters.</p>
           ) : (
             <div style={{ overflowX: "auto", maxHeight: "50vh", overflowY: "auto" }}>
               <table className="dashboard-table">
@@ -164,28 +212,30 @@ export function OutOfSequenceReport({ onClose, embedded = false }) {
                     <th>Villa</th>
                     <th>Zone</th>
                     <th>Block</th>
-                    <th>Completed Item</th>
-                    <th>Incomplete Predecessor(s)</th>
+                    <th>Last Item</th>
+                    <th>Category</th>
+                    <th>Status</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filtered.map((f) => (
-                    <tr key={`${f.villaID}-${f.item.TableItemID}`}>
+                    <tr key={`${f.villaID}-${f.item?.TableItemID ?? "none"}`}>
                       <td>{f.villaID}</td>
                       <td>{villaMetaByID[f.villaID]?.zonenum ?? "—"}</td>
                       <td>{villaMetaByID[f.villaID]?.blocknum ?? "—"}</td>
                       <td>
-                        {f.item.name}
-                        <br />
-                        <span className="file-status-hint">{f.item.TableItemID}</span>
+                        {f.item ? (
+                          <>
+                            {f.item.name}
+                            <br />
+                            <span className="file-status-hint">{f.item.TableItemID}</span>
+                          </>
+                        ) : (
+                          "— (Not Started)"
+                        )}
                       </td>
-                      <td>
-                        {f.incompletePredecessors.map((pred) => (
-                          <div key={pred.TableItemID}>
-                            {pred.name} — <strong>{pred.status}</strong>
-                          </div>
-                        ))}
-                      </td>
+                      <td>{f.item ? getCategory(f.item.TableItemID) : "—"}</td>
+                      <td>{f.itemStatus}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -203,7 +253,7 @@ export function OutOfSequenceReport({ onClose, embedded = false }) {
     <div className="graph-modal-backdrop" onClick={onClose}>
       <div className="graph-modal" onClick={(e) => e.stopPropagation()}>
         <div className="graph-modal-header">
-          <h3>Out of Sequence</h3>
+          <h3>Last Item</h3>
           <button type="button" onClick={onClose}>
             ×
           </button>

@@ -3,8 +3,10 @@ import * as XLSX from "xlsx";
 import { villasApi } from "../../api/villas.js";
 import { constructionItemsApi } from "../../api/constructionItems.js";
 import { useVillaGeoMeta } from "../../hooks/useVillaGeoMeta.js";
-import { getZoneOptions, getBlockOptions, matchesZoneBlock, matchesDateRange } from "../../utils/qualityFilterUtils.js";
+import { getZoneOptions, getBlockOptions, getVillaTypeOptions, getVillaOptions, matchesGeoFilters, matchesMultiSelect, matchesDateRange } from "../../utils/qualityFilterUtils.js";
+import { getVillaNumber, toExcelDate, applyDateCellFormat } from "../../utils/dashboardUtils.js";
 import { StatusCountChart } from "./StatusCountChart.jsx";
+import { MultiSelectFilter } from "./MultiSelectFilter.jsx";
 
 /**
  * Surfaces every NCR across the whole project — an item can now have
@@ -24,13 +26,18 @@ export function NcrReport({ onClose, embedded = false }) {
   const [constructionItemsTemplate, setConstructionItemsTemplate] = useState([]);
   const { villaMetaByID } = useVillaGeoMeta();
 
-  const [villaFilter, setVillaFilter] = useState("");
-  const [zoneFilter, setZoneFilter] = useState("");
-  const [blockFilter, setBlockFilter] = useState("");
+  const [villaFilters, setVillaFilters] = useState([]);
+  const [zoneFilters, setZoneFilters] = useState([]);
+  const [blockFilters, setBlockFilters] = useState([]);
+  const [villaTypeFilters, setVillaTypeFilters] = useState([]);
   const [itemFilter, setItemFilter] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
-  const [openOnly, setOpenOnly] = useState(true);
+  // Replaces the old plain "Open only" checkbox — same default (only
+  // open NCRs shown until you change it), but as a multi-select so
+  // "Open", "Closed", or both can be picked, consistent with every
+  // other status filter across the Quality tabs.
+  const [statusFilters, setStatusFilters] = useState(["Open"]);
   const [clearing, setClearing] = useState(false);
 
   function loadReport() {
@@ -53,8 +60,23 @@ export function NcrReport({ onClose, embedded = false }) {
     () => new Map(constructionItemsTemplate.map((item) => [item.TableItemID, item])),
     [constructionItemsTemplate]
   );
-  const zoneOptions = useMemo(() => getZoneOptions(villaMetaByID), [villaMetaByID]);
-  const blockOptions = useMemo(() => getBlockOptions(villaMetaByID, zoneFilter), [villaMetaByID, zoneFilter]);
+  const zoneOptions = useMemo(() => getZoneOptions(villaMetaByID).map((z) => ({ value: z, label: `Zone ${z}` })), [villaMetaByID]);
+  const blockOptions = useMemo(
+    () => getBlockOptions(villaMetaByID, zoneFilters).map((b) => ({ value: b, label: `Block ${b}` })),
+    [villaMetaByID, zoneFilters]
+  );
+  const villaTypeOptions = useMemo(
+    () => getVillaTypeOptions(villaMetaByID, zoneFilters, blockFilters).map((t) => ({ value: t, label: t })),
+    [villaMetaByID, zoneFilters, blockFilters]
+  );
+  const villaOptions = useMemo(
+    () => getVillaOptions(villaMetaByID, zoneFilters, blockFilters, villaTypeFilters).map((v) => ({ value: v, label: v })),
+    [villaMetaByID, zoneFilters, blockFilters, villaTypeFilters]
+  );
+  const statusOptions = [
+    { value: "Open", label: "Open" },
+    { value: "Closed", label: "Closed" },
+  ];
 
   const findings = useMemo(
     () =>
@@ -72,38 +94,33 @@ export function NcrReport({ onClose, embedded = false }) {
   );
 
   const filtered = useMemo(() => {
-    let result = findings;
-    if (openOnly) result = result.filter((f) => !f.closed);
-    if (villaFilter.trim()) {
-      const needle = villaFilter.trim().toLowerCase();
-      result = result.filter((f) => f.villaID.toLowerCase().includes(needle));
-    }
-    if (zoneFilter || blockFilter) {
-      result = result.filter((f) => matchesZoneBlock(f.villaID, villaMetaByID, zoneFilter, blockFilter));
-    }
-    if (itemFilter) {
-      result = result.filter((f) => f.item.TableItemID === itemFilter);
-    }
-    if (dateFrom || dateTo) {
-      result = result.filter((f) => matchesDateRange(f.date, dateFrom, dateTo));
-    }
-    return result;
-  }, [findings, villaFilter, zoneFilter, blockFilter, itemFilter, dateFrom, dateTo, openOnly, villaMetaByID]);
+    return findings.filter((f) => {
+      if (!matchesMultiSelect(f.closed ? "Closed" : "Open", statusFilters)) return false;
+      if (!matchesMultiSelect(f.villaID, villaFilters)) return false;
+      if (!matchesGeoFilters(f.villaID, villaMetaByID, zoneFilters, blockFilters, villaTypeFilters)) return false;
+      if (itemFilter && f.item.TableItemID !== itemFilter) return false;
+      if (!matchesDateRange(f.date, dateFrom, dateTo)) return false;
+      return true;
+    });
+  }, [findings, villaFilters, zoneFilters, blockFilters, villaTypeFilters, itemFilter, dateFrom, dateTo, statusFilters, villaMetaByID]);
 
   function handleExport() {
     const exportRows = filtered.map((f) => ({
       Villa: f.villaID,
+      "Villa Number": getVillaNumber(f.villaID),
       Zone: villaMetaByID[f.villaID]?.zonenum ?? "",
       Block: villaMetaByID[f.villaID]?.blocknum ?? "",
+      "Villa Type": villaMetaByID[f.villaID]?.villatype ?? "",
       Item: f.item.name,
       "Item ID": f.item.TableItemID,
-      Date: f.date ?? "",
+      Date: toExcelDate(f.date),
       Reason: f.note ?? "",
       Closed: f.closed ? "Yes" : "No",
-      "Closed Date": f.closedDate ?? "",
+      "Closed Date": toExcelDate(f.closedDate),
       "Closing Reason": f.closingNote ?? "",
     }));
-    const sheet = XLSX.utils.json_to_sheet(exportRows);
+    const sheet = XLSX.utils.json_to_sheet(exportRows, { cellDates: true });
+    applyDateCellFormat(sheet);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, sheet, "NCRs");
     XLSX.writeFile(wb, "ncr_report.xlsx");
@@ -148,40 +165,39 @@ export function NcrReport({ onClose, embedded = false }) {
       ) : (
         <>
           <div className="admin-actions" style={{ marginBottom: "0.5rem", alignItems: "center", flexWrap: "wrap", gap: "0.5rem" }}>
-            <input
-              type="text"
-              placeholder="Filter by villa (e.g. V_9)"
-              value={villaFilter}
-              onChange={(e) => setVillaFilter(e.target.value)}
-              style={{ flex: 1, minWidth: "140px", padding: "0.5rem", borderRadius: "6px", border: "1px solid var(--color-border-strong)" }}
+            <MultiSelectFilter
+              label="Zones"
+              options={zoneOptions}
+              selected={zoneFilters}
+              onChange={(next) => {
+                setZoneFilters(next);
+                setBlockFilters([]);
+                setVillaTypeFilters([]);
+              }}
             />
-            <select value={zoneFilter} onChange={(e) => { setZoneFilter(e.target.value); setBlockFilter(""); }}>
-              <option value="">All zones</option>
-              {zoneOptions.map((z) => (
-                <option key={z} value={z}>Zone {z}</option>
-              ))}
-            </select>
-            <select value={blockFilter} onChange={(e) => setBlockFilter(e.target.value)}>
-              <option value="">All blocks</option>
-              {blockOptions.map((b) => (
-                <option key={b} value={b}>Block {b}</option>
-              ))}
-            </select>
+            <MultiSelectFilter
+              label="Blocks"
+              options={blockOptions}
+              selected={blockFilters}
+              onChange={(next) => {
+                setBlockFilters(next);
+                setVillaTypeFilters([]);
+              }}
+            />
+            <MultiSelectFilter label="Villa Types" options={villaTypeOptions} selected={villaTypeFilters} onChange={setVillaTypeFilters} />
+            <MultiSelectFilter label="Villas" options={villaOptions} selected={villaFilters} onChange={setVillaFilters} searchable />
             <select value={itemFilter} onChange={(e) => setItemFilter(e.target.value)}>
               <option value="">All items</option>
               {constructionItemsTemplate.map((item) => (
                 <option key={item.TableItemID} value={item.TableItemID}>{item.name}</option>
               ))}
             </select>
+            <MultiSelectFilter label="Status" options={statusOptions} selected={statusFilters} onChange={setStatusFilters} />
             <label className="file-status-hint" style={{ display: "flex", alignItems: "center", gap: "0.3rem" }}>
               From <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
             </label>
             <label className="file-status-hint" style={{ display: "flex", alignItems: "center", gap: "0.3rem" }}>
               To <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
-            </label>
-            <label style={{ display: "flex", alignItems: "center", gap: "0.3rem", whiteSpace: "nowrap" }}>
-              <input type="checkbox" checked={openOnly} onChange={(e) => setOpenOnly(e.target.checked)} />
-              Open only
             </label>
             <button type="button" className="admin-btn-secondary" onClick={handleExport} disabled={filtered.length === 0}>
               Export to Excel
@@ -200,14 +216,11 @@ export function NcrReport({ onClose, embedded = false }) {
           <StatusCountChart items={filtered} getLabel={(f) => (f.closed ? "Closed" : "Open")} />
 
           <p className="file-status-hint" style={{ marginTop: "0.5rem" }}>
-            {filtered.length} NCR{filtered.length === 1 ? "" : "s"} found
-            {villaFilter.trim() ? ` matching "${villaFilter.trim()}"` : ""}.
+            {filtered.length} NCR{filtered.length === 1 ? "" : "s"} found.
           </p>
 
           {filtered.length === 0 ? (
-            <p className="file-status-hint">
-              {openOnly ? "No open NCRs found." : "No NCRs found."}
-            </p>
+            <p className="file-status-hint">No NCRs match the current filters.</p>
           ) : (
             <div style={{ overflowX: "auto", maxHeight: "50vh", overflowY: "auto" }}>
               <table className="dashboard-table">

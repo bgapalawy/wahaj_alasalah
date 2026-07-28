@@ -3,8 +3,10 @@ import * as XLSX from "xlsx";
 import { villasApi } from "../../api/villas.js";
 import { constructionItemsApi } from "../../api/constructionItems.js";
 import { useVillaGeoMeta } from "../../hooks/useVillaGeoMeta.js";
-import { getZoneOptions, getBlockOptions, matchesZoneBlock, matchesDateRange } from "../../utils/qualityFilterUtils.js";
+import { getZoneOptions, getBlockOptions, getVillaTypeOptions, getVillaOptions, matchesGeoFilters, matchesMultiSelect, matchesDateRange } from "../../utils/qualityFilterUtils.js";
+import { getVillaNumber, toExcelDate, applyDateCellFormat } from "../../utils/dashboardUtils.js";
 import { StatusCountChart } from "./StatusCountChart.jsx";
+import { MultiSelectFilter } from "./MultiSelectFilter.jsx";
 
 const ALL_STATUSES = ["NotStarted", "InProgress", "Notes", "NCR", "Rejected", "Completed"];
 
@@ -25,11 +27,12 @@ export function VillaStatusReport({ onClose, embedded = false }) {
   const [constructionItemsTemplate, setConstructionItemsTemplate] = useState([]);
   const { villaMetaByID } = useVillaGeoMeta();
 
-  const [villaFilter, setVillaFilter] = useState("");
-  const [zoneFilter, setZoneFilter] = useState("");
-  const [blockFilter, setBlockFilter] = useState("");
+  const [villaFilters, setVillaFilters] = useState([]);
+  const [zoneFilters, setZoneFilters] = useState([]);
+  const [blockFilters, setBlockFilters] = useState([]);
+  const [villaTypeFilters, setVillaTypeFilters] = useState([]);
   const [itemFilter, setItemFilter] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
+  const [statusFilters, setStatusFilters] = useState([]);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
 
@@ -49,8 +52,20 @@ export function VillaStatusReport({ onClose, embedded = false }) {
     () => new Map(constructionItemsTemplate.map((item) => [item.TableItemID, item])),
     [constructionItemsTemplate]
   );
-  const zoneOptions = useMemo(() => getZoneOptions(villaMetaByID), [villaMetaByID]);
-  const blockOptions = useMemo(() => getBlockOptions(villaMetaByID, zoneFilter), [villaMetaByID, zoneFilter]);
+  const zoneOptions = useMemo(() => getZoneOptions(villaMetaByID).map((z) => ({ value: z, label: `Zone ${z}` })), [villaMetaByID]);
+  const blockOptions = useMemo(
+    () => getBlockOptions(villaMetaByID, zoneFilters).map((b) => ({ value: b, label: `Block ${b}` })),
+    [villaMetaByID, zoneFilters]
+  );
+  const villaTypeOptions = useMemo(
+    () => getVillaTypeOptions(villaMetaByID, zoneFilters, blockFilters).map((t) => ({ value: t, label: t })),
+    [villaMetaByID, zoneFilters, blockFilters]
+  );
+  const villaOptions = useMemo(
+    () => getVillaOptions(villaMetaByID, zoneFilters, blockFilters, villaTypeFilters).map((v) => ({ value: v, label: v })),
+    [villaMetaByID, zoneFilters, blockFilters, villaTypeFilters]
+  );
+  const statusOptions = ALL_STATUSES.map((s) => ({ value: s, label: s }));
 
   const findings = useMemo(
     () =>
@@ -65,38 +80,31 @@ export function VillaStatusReport({ onClose, embedded = false }) {
   );
 
   const filtered = useMemo(() => {
-    let result = findings;
-    if (villaFilter.trim()) {
-      const needle = villaFilter.trim().toLowerCase();
-      result = result.filter((f) => f.villaID.toLowerCase().includes(needle));
-    }
-    if (zoneFilter || blockFilter) {
-      result = result.filter((f) => matchesZoneBlock(f.villaID, villaMetaByID, zoneFilter, blockFilter));
-    }
-    if (itemFilter) {
-      result = result.filter((f) => f.item.TableItemID === itemFilter);
-    }
-    if (statusFilter) {
-      result = result.filter((f) => f.status === statusFilter);
-    }
-    if (dateFrom || dateTo) {
-      result = result.filter((f) => matchesDateRange(f.date, dateFrom, dateTo));
-    }
-    return result;
-  }, [findings, villaFilter, zoneFilter, blockFilter, itemFilter, statusFilter, dateFrom, dateTo, villaMetaByID]);
+    return findings.filter((f) => {
+      if (!matchesMultiSelect(f.villaID, villaFilters)) return false;
+      if (!matchesGeoFilters(f.villaID, villaMetaByID, zoneFilters, blockFilters, villaTypeFilters)) return false;
+      if (itemFilter && f.item.TableItemID !== itemFilter) return false;
+      if (!matchesMultiSelect(f.status, statusFilters)) return false;
+      if (!matchesDateRange(f.date, dateFrom, dateTo)) return false;
+      return true;
+    });
+  }, [findings, villaFilters, zoneFilters, blockFilters, villaTypeFilters, itemFilter, statusFilters, dateFrom, dateTo, villaMetaByID]);
 
   function handleExport() {
     const exportRows = filtered.map((f) => ({
       Villa: f.villaID,
+      "Villa Number": getVillaNumber(f.villaID),
       Zone: villaMetaByID[f.villaID]?.zonenum ?? "",
       Block: villaMetaByID[f.villaID]?.blocknum ?? "",
+      "Villa Type": villaMetaByID[f.villaID]?.villatype ?? "",
       Item: f.item.name,
       "Item ID": f.item.TableItemID,
       Status: f.status,
-      Date: f.date ?? "",
+      Date: toExcelDate(f.date),
       Notes: f.note ?? "",
     }));
-    const sheet = XLSX.utils.json_to_sheet(exportRows);
+    const sheet = XLSX.utils.json_to_sheet(exportRows, { cellDates: true });
+    applyDateCellFormat(sheet);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, sheet, "Villa Status");
     XLSX.writeFile(wb, "villa_status_report.xlsx");
@@ -118,37 +126,34 @@ export function VillaStatusReport({ onClose, embedded = false }) {
       ) : (
         <>
           <div className="admin-actions" style={{ marginBottom: "0.5rem", flexWrap: "wrap", gap: "0.5rem" }}>
-            <input
-              type="text"
-              placeholder="Filter by villa (e.g. V_9)"
-              value={villaFilter}
-              onChange={(e) => setVillaFilter(e.target.value)}
-              style={{ flex: 1, minWidth: "140px", padding: "0.5rem", borderRadius: "6px", border: "1px solid var(--color-border-strong)" }}
+            <MultiSelectFilter
+              label="Zones"
+              options={zoneOptions}
+              selected={zoneFilters}
+              onChange={(next) => {
+                setZoneFilters(next);
+                setBlockFilters([]);
+                setVillaTypeFilters([]);
+              }}
             />
-            <select value={zoneFilter} onChange={(e) => { setZoneFilter(e.target.value); setBlockFilter(""); }}>
-              <option value="">All zones</option>
-              {zoneOptions.map((z) => (
-                <option key={z} value={z}>Zone {z}</option>
-              ))}
-            </select>
-            <select value={blockFilter} onChange={(e) => setBlockFilter(e.target.value)}>
-              <option value="">All blocks</option>
-              {blockOptions.map((b) => (
-                <option key={b} value={b}>Block {b}</option>
-              ))}
-            </select>
+            <MultiSelectFilter
+              label="Blocks"
+              options={blockOptions}
+              selected={blockFilters}
+              onChange={(next) => {
+                setBlockFilters(next);
+                setVillaTypeFilters([]);
+              }}
+            />
+            <MultiSelectFilter label="Villa Types" options={villaTypeOptions} selected={villaTypeFilters} onChange={setVillaTypeFilters} />
+            <MultiSelectFilter label="Villas" options={villaOptions} selected={villaFilters} onChange={setVillaFilters} searchable />
             <select value={itemFilter} onChange={(e) => setItemFilter(e.target.value)}>
               <option value="">All items</option>
               {constructionItemsTemplate.map((item) => (
                 <option key={item.TableItemID} value={item.TableItemID}>{item.name}</option>
               ))}
             </select>
-            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
-              <option value="">All statuses</option>
-              {ALL_STATUSES.map((s) => (
-                <option key={s} value={s}>{s}</option>
-              ))}
-            </select>
+            <MultiSelectFilter label="Status" options={statusOptions} selected={statusFilters} onChange={setStatusFilters} />
             <label className="file-status-hint" style={{ display: "flex", alignItems: "center", gap: "0.3rem" }}>
               From <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
             </label>

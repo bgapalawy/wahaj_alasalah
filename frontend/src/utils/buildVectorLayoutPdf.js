@@ -678,17 +678,23 @@ export async function buildVectorLayoutPdf({
     }
   }
 
-  // Pass 2 (fit sizing) intentionally switches to VISIBLE-only from here
-  // on — unlike rotation above, sizing SHOULD be based on what's
-  // actually going to be drawn on this particular sheet (a spacious
-  // "Print Area" selection shouldn't get squeezed down by the median
-  // size of some dense, unrelated part of the site that isn't even on
-  // this page), so this is the one place the print-window scoping still
-  // applies the way it always did.
-  const visibleAngled = angled.filter((a) => a.L.visible);
+  // Pass 2 (fit sizing) now ALSO uses the full population, matching
+  // Pass 1/1b's rotation fix — reversing an earlier deliberate choice to
+  // scope sizing to the visible print-window subset only. That choice
+  // was reasoned as "a spacious Print Area selection shouldn't get
+  // squeezed by a dense unrelated part of the site," but in practice it
+  // meant a "Print Area" export's typical/median label size could drift
+  // from the full "Download PDF" export's, which is exactly the
+  // inconsistency being fixed here: same population feeding the median
+  // calculation in both cases, so the two exports size labels the same
+  // way. (A print made at a genuinely different PLOT SCALE — e.g. one
+  // sheet at 1:2,000 and another at 1:4,000 — will still look different
+  // in absolute terms; that's the scale choice doing its job, not this
+  // sizing logic.) Only the actual DRAWING below stays scoped to what's
+  // visible in the current window.
 
   // Pass 2: fit metrics using the (now neighbor-consistent) angle.
-  const measured = visibleAngled.map(({ L, ang }) => {
+  const measured = angled.map(({ L, ang }) => {
     const along = spanAlong(L.ring, ang);
     const across = spanAlong(L.ring, ang + 90);
     // Local cross-section through the label's OWN centroid, in the
@@ -721,6 +727,7 @@ export async function buildVectorLayoutPdf({
   }
 
   measured.forEach(({ L, ang, fitAlong, fitAcross, fitSize }) => {
+    if (!L.visible) return; // sizing above used the full population; drawing stays scoped to this window
     const fontMm = L.cadHeightM ? fitSize : Math.min(targetMm, fitAlong, fitAcross, MAX_LABEL_MM);
     // Cull what can't be printed legibly even at the shared target size
     // — no tolerance below the legibility floor (ArcGIS-style:

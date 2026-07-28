@@ -1,6 +1,7 @@
 import { query } from "../config/postgres.js";
 import { constructionItems } from "../data/constructionItems.js";
 import { autoUpdateInvoiceOnCompletion } from "./invoiceService.js";
+import { recordAuditLog } from "./auditLogService.js";
 
 /**
  * Tracks per-villa, per-construction-item status + completion date.
@@ -75,7 +76,7 @@ export async function getAllActivityStatuses(villaID) {
  */
 const VALID_ACTIVITY_STATUSES = new Set(["NotStarted", "InProgress", "Completed", "NCR", "Rejected", "Notes"]);
 
-export async function updateActivityStatus(villaID, tableItemId, { status, completedDate, note }) {
+export async function updateActivityStatus(villaID, tableItemId, { status, completedDate, note, changedBy = null }) {
   if (!VALID_ACTIVITY_STATUSES.has(status)) {
     const err = new Error(`"${status}" is not a valid activity status.`);
     err.status = 400;
@@ -127,6 +128,19 @@ export async function updateActivityStatus(villaID, tableItemId, { status, compl
     note: result?.note ?? normalizedNote,
   }).catch((err) => {
     console.error(`Could not record status history: ${err.message}`);
+  });
+
+  await recordAuditLog({
+    villaID,
+    tableItemId,
+    entityType: "activity_status",
+    action: "updated",
+    field: "status",
+    oldValue: previousStatus,
+    newValue: result?.status ?? status,
+    changedBy,
+  }).catch((err) => {
+    console.error(`Could not record audit log: ${err.message}`);
   });
 
   await autoUpdateInvoiceOnCompletion(villaID, tableItemId, previousStatus, status).catch((err) => {

@@ -4,6 +4,8 @@ import { getActivityStatus, updateActivityStatus, getAllActivityStatuses, getAct
 import { getVillaDashboardData, getPlannedDatesForItem } from "../services/villaDashboardService.js";
 import { getInvoiceStatus, getAllInvoiceStatuses, updateInvoiceStatus } from "../services/invoiceService.js";
 import { getNcrsForItem, addNcr, updateNcr, getNcrReportRows, clearAllNcrs } from "../services/ncrService.js";
+import { getScheduleNotesForItem, addScheduleNote, getScheduleNoteReportRows } from "../services/scheduleNoteService.js";
+import { getAuditLogRows } from "../services/auditLogService.js";
 
 export const villasRouter = Router();
 
@@ -24,6 +26,31 @@ villasRouter.get("/", async (req, res, next) => {
 villasRouter.get("/status-report", async (req, res, next) => {
   try {
     const rows = await getStatusReportRows();
+    res.json(rows);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Every audit log entry, most recent first — feeds the "History" tab of
+// the Quality dashboard. Same registration-order requirement as the
+// other report routes (must come before GET /:villaID).
+villasRouter.get("/audit-log", async (req, res, next) => {
+  try {
+    const rows = await getAuditLogRows();
+    res.json(rows);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Every schedule note across the project, joined with each row's
+// current planned start + actual status — feeds the "Scheduling" tab
+// of the Quality dashboard. Must be registered BEFORE GET /:villaID
+// below, same reason as /ncr-report and /status-report above.
+villasRouter.get("/schedule-notes-report", async (req, res, next) => {
+  try {
+    const rows = await getScheduleNoteReportRows();
     res.json(rows);
   } catch (err) {
     next(err);
@@ -149,7 +176,11 @@ villasRouter.get("/:villaID/activities/:tableItemId/ncrs", async (req, res, next
 villasRouter.post("/:villaID/activities/:tableItemId/ncrs", async (req, res, next) => {
   try {
     const { openedDate, note } = req.body;
-    const created = await addNcr(req.params.villaID, req.params.tableItemId, { openedDate, note });
+    const created = await addNcr(req.params.villaID, req.params.tableItemId, {
+      openedDate,
+      note,
+      changedBy: req.user?.username ?? null,
+    });
     res.status(201).json(created);
   } catch (err) {
     next(err);
@@ -167,8 +198,35 @@ villasRouter.patch("/:villaID/activities/:tableItemId/ncrs/:ncrId", async (req, 
       closingNote,
       note,
       openedDate,
+      changedBy: req.user?.username ?? null,
     });
     res.json(updated);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// A dated log of remarks against one villa/item's computed schedule
+// status — see scheduleNoteService.js's doc comment for why this is a
+// separate table from the NCR tracker above.
+villasRouter.get("/:villaID/activities/:tableItemId/schedule-notes", async (req, res, next) => {
+  try {
+    const notes = await getScheduleNotesForItem(req.params.villaID, req.params.tableItemId);
+    res.json(notes);
+  } catch (err) {
+    next(err);
+  }
+});
+
+villasRouter.post("/:villaID/activities/:tableItemId/schedule-notes", async (req, res, next) => {
+  try {
+    const { noteDate, note } = req.body;
+    const created = await addScheduleNote(req.params.villaID, req.params.tableItemId, {
+      noteDate,
+      note,
+      changedBy: req.user?.username ?? null,
+    });
+    res.status(201).json(created);
   } catch (err) {
     next(err);
   }
@@ -182,6 +240,7 @@ villasRouter.patch("/:villaID/activities/:tableItemId", async (req, res, next) =
       status,
       completedDate,
       note,
+      changedBy: req.user?.username ?? null,
     });
     res.json(updated);
   } catch (err) {

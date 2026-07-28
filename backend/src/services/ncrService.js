@@ -1,4 +1,5 @@
 import { query } from "../config/postgres.js";
+import { recordAuditLog } from "./auditLogService.js";
 
 /**
  * A villa/item can have multiple, independently-tracked NCRs (Non-
@@ -45,7 +46,7 @@ export async function getNcrsForItem(villaID, tableItemId) {
 }
 
 /** Opens a new NCR — this is what lets an item have 2+ NCRs: every call inserts a new row, never overwrites an existing one. */
-export async function addNcr(villaID, tableItemId, { openedDate, note }) {
+export async function addNcr(villaID, tableItemId, { openedDate, note, changedBy = null }) {
   const { rows } = await query(
     `INSERT INTO villa_item_ncr (villa_id, table_item_id, opened_date, note)
      VALUES ($1, $2, COALESCE($3::date, CURRENT_DATE), $4)
@@ -57,7 +58,20 @@ export async function addNcr(villaID, tableItemId, { openedDate, note }) {
                created_at, updated_at`,
     [villaID, tableItemId, openedDate || null, note?.trim() || null]
   );
-  return rowToNcr(rows[0]);
+  const created = rowToNcr(rows[0]);
+
+  await recordAuditLog({
+    villaID,
+    tableItemId,
+    entityType: "ncr",
+    action: "created",
+    newValue: created.note,
+    changedBy,
+  }).catch((err) => {
+    console.error(`Could not record audit log: ${err.message}`);
+  });
+
+  return created;
 }
 
 /**
@@ -69,7 +83,7 @@ export async function addNcr(villaID, tableItemId, { openedDate, note }) {
  * to today, same "pick a date or take today" pattern as the main
  * activity status fields.
  */
-export async function updateNcr(villaID, tableItemId, ncrId, { closed, closedDate, closingNote, note, openedDate }) {
+export async function updateNcr(villaID, tableItemId, ncrId, { closed, closedDate, closingNote, note, openedDate, changedBy = null }) {
   const setClauses = ["updated_at = now()"];
   const params = [villaID, tableItemId, ncrId];
 
@@ -118,7 +132,26 @@ export async function updateNcr(villaID, tableItemId, ncrId, { closed, closedDat
     err.status = 404;
     throw err;
   }
-  return rowToNcr(rows[0]);
+  const updated = rowToNcr(rows[0]);
+
+  // The "closed" toggle is the main action worth naming (close/reopen);
+  // anything else (a note edit) is logged as a generic update. NcrList
+  // sends "closed" alone or together with closedDate/closingNote in one
+  // call, never those two alone, so this doesn't miss a real close/
+  // reopen action.
+  await recordAuditLog({
+    villaID,
+    tableItemId,
+    entityType: "ncr",
+    action: closed !== undefined ? (closed ? "closed" : "reopened") : "updated",
+    field: closed !== undefined ? "closed" : "note",
+    newValue: closed !== undefined ? (updated.closingNote ?? String(updated.closed)) : updated.note,
+    changedBy,
+  }).catch((err) => {
+    console.error(`Could not record audit log: ${err.message}`);
+  });
+
+  return updated;
 }
 
 /**
