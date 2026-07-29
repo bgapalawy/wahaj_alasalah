@@ -22,6 +22,18 @@ import { ConstructionItemSelect } from "../panels/ConstructionItemSelect.jsx";
 
 const today = () => new Date().toISOString().slice(0, 10);
 
+// Fixed, not derived from findings — the overview status filter needs
+// options that don't disappear from the dropdown once selected (which
+// would happen if these were built from overviewFindings, since that's
+// already filtered by this same control).
+const SCHEDULE_STATUS_OPTIONS = [
+  { value: "ready", label: "Ready" },
+  { value: "blocked", label: "Blocked" },
+  { value: "NotStarted", label: "NotStarted" },
+  { value: "InProgress", label: "InProgress" },
+  { value: "Completed", label: "Completed" },
+];
+
 /**
  * Pick a construction item, see its live schedule classification for
  * EVERY villa at once (same computeScheduleStatusFast classifier the
@@ -64,6 +76,7 @@ export function SchedulingReport({ onClose, embedded = false }) {
   const [viewMode, setViewMode] = useState("single"); // single | overview
   const [overviewRows, setOverviewRows] = useState(null); // null = not loaded yet
   const [overviewStatus, setOverviewStatus] = useState("idle"); // idle | loading | error | success
+  const [overviewStatusFilters, setOverviewStatusFilters] = useState([]);
 
   useEffect(() => {
     constructionItemsApi.list().then(setConstructionItemsTemplate).catch(() => setConstructionItemsTemplate([]));
@@ -137,21 +150,59 @@ export function SchedulingReport({ onClose, embedded = false }) {
           itemByTableId: itemMaps.itemByTableId,
           villaStatusMap: allVillaStatuses[r.villaID] ?? {},
         });
-        results.push({ item, villaID: r.villaID, scheduleStatus });
+        if (!matchesMultiSelect(scheduleStatus, overviewStatusFilters)) return;
+        // Only worth the recursive walk for rows that are actually
+        // blocked — computing it for every Ready/NotStarted/Completed/
+        // InProgress row too would be 82 x ~1,540 wasted calls.
+        const blockingPredecessors =
+          scheduleStatus === "blocked"
+            ? getRootCauseBlockers(item, constructionItemsTemplate, allVillaStatuses[r.villaID] ?? {})
+            : [];
+        results.push({ item, villaID: r.villaID, scheduleStatus, blockingPredecessors });
       });
     });
     return results;
-  }, [overviewRows, allVillaStatuses, villaMetaByID, villaFilters, zoneFilters, blockFilters, villaTypeFilters, cutoffDate, itemMaps]);
+  }, [
+    overviewRows,
+    allVillaStatuses,
+    villaMetaByID,
+    villaFilters,
+    zoneFilters,
+    blockFilters,
+    villaTypeFilters,
+    overviewStatusFilters,
+    cutoffDate,
+    itemMaps,
+    constructionItemsTemplate,
+  ]);
 
   const overviewByItem = useMemo(() => {
     const map = new Map();
     overviewFindings.forEach((f) => {
-      if (!map.has(f.item.TableItemID)) map.set(f.item.TableItemID, { item: f.item, counts: {} });
+      if (!map.has(f.item.TableItemID)) map.set(f.item.TableItemID, { item: f.item, counts: {}, blockers: new Map() });
       const entry = map.get(f.item.TableItemID);
       entry.counts[f.scheduleStatus] = (entry.counts[f.scheduleStatus] ?? 0) + 1;
+      // Root-cause blockers, deduplicated per item and counted by how
+      // many villas each one is actually the blocker for — "Civil-3
+      // (NotStarted) — 12 villas" tells you far more than just a raw
+      // blocked count does. Any schedule notes already logged against
+      // that SAME blocker on that SAME villa (ScheduleStatusPanel.jsx,
+      // per-villa) are pulled in too, tagged with which villa they're
+      // from since one blocker can span many villas with different
+      // notes each.
+      f.blockingPredecessors.forEach((p) => {
+        if (!entry.blockers.has(p.TableItemID)) {
+          entry.blockers.set(p.TableItemID, { name: p.name, status: p.status, villaCount: 0, notes: [] });
+        }
+        const blockerEntry = entry.blockers.get(p.TableItemID);
+        blockerEntry.villaCount += 1;
+        allNotes
+          .filter((n) => n.villaID === f.villaID && n.tableItemId === p.TableItemID)
+          .forEach((n) => blockerEntry.notes.push({ villaID: f.villaID, noteDate: n.noteDate, note: n.note }));
+      });
     });
     return [...map.values()];
-  }, [overviewFindings]);
+  }, [overviewFindings, allNotes]);
 
   // Every real villa gets a row (not just the ones the backend has cost
   // data for), same "missing villa -> zero-cost/NotStarted placeholder"
@@ -261,6 +312,13 @@ export function SchedulingReport({ onClose, embedded = false }) {
       const row = { Item: e.item.name, "Item ID": e.item.TableItemID };
       statusCols.forEach((s) => { row[s] = e.counts[s] ?? 0; });
       row.Total = Object.values(e.counts).reduce((a, b) => a + b, 0);
+      row["Blocked By"] = [...e.blockers.values()]
+        .map((b) => {
+          const base = `${b.name} (${b.status}) — ${b.villaCount} villa${b.villaCount === 1 ? "" : "s"}`;
+          const notesText = b.notes.map((n) => `${n.villaID} ${n.noteDate}: ${n.note}`).join(" | ");
+          return notesText ? `${base} [notes: ${notesText}]` : base;
+        })
+        .join("; ");
       return row;
     });
     const sheet = XLSX.utils.json_to_sheet(exportRows);
@@ -427,6 +485,7 @@ export function SchedulingReport({ onClose, embedded = false }) {
             />
             <MultiSelectFilter label="Villa Types" options={villaTypeOptions} selected={villaTypeFilters} onChange={setVillaTypeFilters} />
             <MultiSelectFilter label="Villas" options={villaOptions} selected={villaFilters} onChange={setVillaFilters} searchable />
+            <MultiSelectFilter label="Status" options={SCHEDULE_STATUS_OPTIONS} selected={overviewStatusFilters} onChange={setOverviewStatusFilters} />
             <label className="file-status-hint" style={{ display: "flex", alignItems: "center", gap: "0.3rem" }}>
               Status as of <input type="date" value={cutoffDate} onChange={(e) => setCutoffDate(e.target.value)} />
             </label>
@@ -468,6 +527,7 @@ export function SchedulingReport({ onClose, embedded = false }) {
                       <th>InProgress</th>
                       <th>Completed</th>
                       <th>Total</th>
+                      <th>Blocked By</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -486,6 +546,24 @@ export function SchedulingReport({ onClose, embedded = false }) {
                           <td>{e.counts.InProgress ?? 0}</td>
                           <td>{e.counts.Completed ?? 0}</td>
                           <td>{total}</td>
+                          <td>
+                            {e.blockers.size === 0
+                              ? "—"
+                              : [...e.blockers.values()].map((b) => (
+                                  <div key={b.name} style={{ marginBottom: "0.3rem" }}>
+                                    {b.name} (<strong>{b.status}</strong>) — {b.villaCount} villa{b.villaCount === 1 ? "" : "s"}
+                                    {b.notes.length > 0 && (
+                                      <div style={{ marginLeft: "0.6rem" }}>
+                                        {b.notes.map((n, i) => (
+                                          <div key={i} className="file-status-hint">
+                                            <span style={{ fontWeight: 600 }}>{n.villaID}</span> — {n.noteDate}: {n.note}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                ))}
+                          </td>
                         </tr>
                       );
                     })}
