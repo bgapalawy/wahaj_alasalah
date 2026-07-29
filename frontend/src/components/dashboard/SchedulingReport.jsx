@@ -56,6 +56,15 @@ export function SchedulingReport({ onClose, embedded = false }) {
   const [villaTypeFilters, setVillaTypeFilters] = useState([]);
   const [statusFilters, setStatusFilters] = useState([]);
 
+  // "All items" overview — every item's schedule status breakdown at
+  // once, instead of picking one at a time. Not loaded automatically:
+  // it's 82 parallel per-item API calls (same one this file already
+  // makes for a single item, just for every item), which is real load
+  // to put on the backend unprompted every time this tab opens.
+  const [viewMode, setViewMode] = useState("single"); // single | overview
+  const [overviewRows, setOverviewRows] = useState(null); // null = not loaded yet
+  const [overviewStatus, setOverviewStatus] = useState("idle"); // idle | loading | error | success
+
   useEffect(() => {
     constructionItemsApi.list().then(setConstructionItemsTemplate).catch(() => setConstructionItemsTemplate([]));
     villasApi.getScheduleNotesReport().then(setAllNotes).catch(() => setAllNotes([]));
@@ -81,6 +90,68 @@ export function SchedulingReport({ onClose, embedded = false }) {
     const itemByTableId = new Map(constructionItemsTemplate.map((t) => [t.TableItemID, t]));
     return { itemById, itemByTableId };
   }, [constructionItemsTemplate]);
+
+  // Fetches every item's per-villa planned-date data in parallel (82
+  // calls, same dashboardApi.getConstructionItem the single-item view
+  // above already uses one at a time) — only runs when explicitly
+  // requested via the button below, not automatically on tab open.
+  function loadOverview() {
+    setOverviewStatus("loading");
+    Promise.all(
+      constructionItemsTemplate.map((item) =>
+        dashboardApi
+          .getConstructionItem(item.TableItemID)
+          .then((rows) => ({ item, rows }))
+          .catch(() => ({ item, rows: [] }))
+      )
+    )
+      .then((perItem) => {
+        setOverviewRows(perItem);
+        setOverviewStatus("success");
+      })
+      .catch(() => setOverviewStatus("error"));
+  }
+
+  // One row per (item, villa) — filtered by the same zone/block/villa
+  // type/villa selections as the single-item view, then rolled up into
+  // a per-item status breakdown for display (a full 1,500 x 82 row
+  // table would be unusable; this is the useful summary of it).
+  const overviewFindings = useMemo(() => {
+    if (!overviewRows || !allVillaStatuses) return [];
+    const cutoff = new Date(`${cutoffDate}T00:00:00`);
+    const results = [];
+    overviewRows.forEach(({ item, rows }) => {
+      const knownVillaIDs = new Set(rows.map((r) => r.villaID));
+      const missing = Object.keys(villaMetaByID)
+        .filter((id) => !knownVillaIDs.has(id))
+        .map((villaID) => ({ villaID, plannedStartDate: null, actualStatus: "NotStarted" }));
+      [...rows, ...missing].forEach((r) => {
+        if (!matchesMultiSelect(r.villaID, villaFilters)) return;
+        if (!matchesGeoFilters(r.villaID, villaMetaByID, zoneFilters, blockFilters, villaTypeFilters)) return;
+        const scheduleStatus = computeScheduleStatusFast({
+          targetTableItemId: item.TableItemID,
+          targetActualStatus: r.actualStatus,
+          targetPlannedStartDate: r.plannedStartDate,
+          cutoffDate: cutoff,
+          itemById: itemMaps.itemById,
+          itemByTableId: itemMaps.itemByTableId,
+          villaStatusMap: allVillaStatuses[r.villaID] ?? {},
+        });
+        results.push({ item, villaID: r.villaID, scheduleStatus });
+      });
+    });
+    return results;
+  }, [overviewRows, allVillaStatuses, villaMetaByID, villaFilters, zoneFilters, blockFilters, villaTypeFilters, cutoffDate, itemMaps]);
+
+  const overviewByItem = useMemo(() => {
+    const map = new Map();
+    overviewFindings.forEach((f) => {
+      if (!map.has(f.item.TableItemID)) map.set(f.item.TableItemID, { item: f.item, counts: {} });
+      const entry = map.get(f.item.TableItemID);
+      entry.counts[f.scheduleStatus] = (entry.counts[f.scheduleStatus] ?? 0) + 1;
+    });
+    return [...map.values()];
+  }, [overviewFindings]);
 
   // Every real villa gets a row (not just the ones the backend has cost
   // data for), same "missing villa -> zero-cost/NotStarted placeholder"
@@ -182,14 +253,42 @@ export function SchedulingReport({ onClose, embedded = false }) {
     XLSX.writeFile(wb, `scheduling_${selectedItem?.TableItemID ?? "report"}.xlsx`);
   }
 
+  function handleExportOverview() {
+    const statusesSeen = new Set();
+    overviewByItem.forEach((e) => Object.keys(e.counts).forEach((s) => statusesSeen.add(s)));
+    const statusCols = [...statusesSeen].sort();
+    const exportRows = overviewByItem.map((e) => {
+      const row = { Item: e.item.name, "Item ID": e.item.TableItemID };
+      statusCols.forEach((s) => { row[s] = e.counts[s] ?? 0; });
+      row.Total = Object.values(e.counts).reduce((a, b) => a + b, 0);
+      return row;
+    });
+    const sheet = XLSX.utils.json_to_sheet(exportRows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, sheet, "Scheduling Overview");
+    XLSX.writeFile(wb, `scheduling_overview_${cutoffDate}.xlsx`);
+  }
+
   const content = (
     <>
       <p className="file-status-hint">
         Pick an item to see its schedule status across every villa, with the root cause when Blocked and any notes
-        logged against it.
+        logged against it — or switch to "All Items" for a project-wide breakdown of every item's schedule status
+        at once, as of a chosen date.
       </p>
 
-      <ConstructionItemSelect value={selectedItem} onChange={setSelectedItem} />
+      <div className="status-tabs" style={{ marginBottom: "0.5rem" }}>
+        <button type="button" className={viewMode === "single" ? "active" : ""} onClick={() => setViewMode("single")}>
+          Single Item
+        </button>
+        <button type="button" className={viewMode === "overview" ? "active" : ""} onClick={() => setViewMode("overview")}>
+          All Items
+        </button>
+      </div>
+
+      {viewMode === "single" && (
+        <>
+          <ConstructionItemSelect value={selectedItem} onChange={setSelectedItem} />
 
       {!selectedItem && (
         <p className="file-status-hint" style={{ marginTop: "0.5rem" }}>
@@ -299,6 +398,102 @@ export function SchedulingReport({ onClose, embedded = false }) {
               </tbody>
             </table>
           </div>
+        </>
+      )}
+        </>
+      )}
+
+      {viewMode === "overview" && (
+        <>
+          <div className="admin-actions" style={{ margin: "0.75rem 0 0.5rem", flexWrap: "wrap", gap: "0.5rem" }}>
+            <MultiSelectFilter
+              label="Zones"
+              options={zoneOptions}
+              selected={zoneFilters}
+              onChange={(next) => {
+                setZoneFilters(next);
+                setBlockFilters([]);
+                setVillaTypeFilters([]);
+              }}
+            />
+            <MultiSelectFilter
+              label="Blocks"
+              options={blockOptions}
+              selected={blockFilters}
+              onChange={(next) => {
+                setBlockFilters(next);
+                setVillaTypeFilters([]);
+              }}
+            />
+            <MultiSelectFilter label="Villa Types" options={villaTypeOptions} selected={villaTypeFilters} onChange={setVillaTypeFilters} />
+            <MultiSelectFilter label="Villas" options={villaOptions} selected={villaFilters} onChange={setVillaFilters} searchable />
+            <label className="file-status-hint" style={{ display: "flex", alignItems: "center", gap: "0.3rem" }}>
+              Status as of <input type="date" value={cutoffDate} onChange={(e) => setCutoffDate(e.target.value)} />
+            </label>
+            <button type="button" onClick={loadOverview} disabled={overviewStatus === "loading" || constructionItemsTemplate.length === 0}>
+              {overviewStatus === "loading" ? "Loading…" : overviewRows ? "Reload" : "Load all items"}
+            </button>
+            {overviewByItem.length > 0 && (
+              <button type="button" className="admin-btn-secondary" onClick={handleExportOverview}>
+                Export to Excel
+              </button>
+            )}
+          </div>
+
+          {overviewStatus === "error" && <p className="upload-error">Couldn't load the overview — try again.</p>}
+          {overviewStatus === "idle" && (
+            <p className="file-status-hint">
+              Click "Load all items" to fetch every item's schedule status across the filtered villas — this is 82
+              requests at once, so it's on-demand rather than automatic.
+            </p>
+          )}
+
+          {overviewByItem.length > 0 && (
+            <>
+              <StatusCountChart items={overviewFindings} getLabel={(f) => f.scheduleStatus ?? "Unknown"} />
+
+              <p className="file-status-hint" style={{ marginTop: "0.5rem" }}>
+                {overviewByItem.length} item{overviewByItem.length === 1 ? "" : "s"}, {overviewFindings.length} villa-item
+                combinations as of {cutoffDate}.
+              </p>
+
+              <div style={{ overflowX: "auto", maxHeight: "50vh", overflowY: "auto" }}>
+                <table className="dashboard-table">
+                  <thead>
+                    <tr>
+                      <th>Item</th>
+                      <th>Ready</th>
+                      <th>Blocked</th>
+                      <th>NotStarted</th>
+                      <th>InProgress</th>
+                      <th>Completed</th>
+                      <th>Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {overviewByItem.map((e) => {
+                      const total = Object.values(e.counts).reduce((a, b) => a + b, 0);
+                      return (
+                        <tr key={e.item.TableItemID}>
+                          <td>
+                            {e.item.name}
+                            <br />
+                            <span className="file-status-hint">{e.item.TableItemID}</span>
+                          </td>
+                          <td>{e.counts.ready ?? 0}</td>
+                          <td>{e.counts.blocked ?? 0}</td>
+                          <td>{e.counts.NotStarted ?? 0}</td>
+                          <td>{e.counts.InProgress ?? 0}</td>
+                          <td>{e.counts.Completed ?? 0}</td>
+                          <td>{total}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
         </>
       )}
     </>

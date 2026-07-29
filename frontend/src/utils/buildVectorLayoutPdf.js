@@ -178,6 +178,14 @@ export async function buildVectorLayoutPdf({
     }
     return false;
   }
+  // Same bounds check as featureVisible, for a single point rather than a
+  // polygon ring — highlight labels (below) are positioned at a
+  // block/zone's centroid, not a full geometry, so they need this
+  // simpler version rather than featureVisible itself.
+  function pointVisible(lng, lat) {
+    return lng >= minLng - cullTolLng && lng <= maxLng + cullTolLng &&
+           lat >= minLat - cullTolLat && lat <= maxLat + cullTolLat;
+  }
 
   // Clip all map content to the neatline. jsPDF has a low-level clip API:
   // build a rect path then call clip() + discardPath(). Wrapped in
@@ -783,8 +791,8 @@ export async function buildVectorLayoutPdf({
   // without needing a solid box.
   if (highlightGroupLabels.length > 0) {
     const labelColor = hexToRgb("#ea580c");
-    const MIN_FONT_MM = 0.8 * Kfont;
-    const MAX_FONT_MM = 1.3 * Kfont; // caps zone labels too — their own bounding box is far too wide to fit-to-width sensibly
+    const MIN_FONT_MM = 1.3 * Kfont;
+    const MAX_FONT_MM = 2.2 * Kfont; // caps zone labels too — their own bounding box is far too wide to fit-to-width sensibly
     const haloStep = 0.12 * K;
     const haloOffsets = [[-1, -1], [1, -1], [-1, 1], [1, 1], [0, -1], [0, 1], [-1, 0], [1, 0]];
 
@@ -792,6 +800,18 @@ export async function buildVectorLayoutPdf({
 
     highlightGroupLabels.forEach((g) => {
       if (g.lng == null || g.lat == null) return;
+      // The bug this fixes: with no check here at all, EVERY highlight
+      // label — all of them, project-wide — got projected and drawn on
+      // every export, "Download PDF" (whole site, so harmless — every
+      // label really is in view there) and "Print Area" alike. In a
+      // small windowed selection, that meant dozens of stray labels for
+      // blocks nowhere near the printed area, several of them landing
+      // on top of each other or off in the page margins — the actual
+      // cause of the garbled/overlapping zone-block text reported for
+      // Print Area specifically. Villa parcels and villa-number labels
+      // already had this same check (featureVisible / the `visible`
+      // flag); this was the one place it was missing.
+      if (!pointVisible(g.lng, g.lat)) return;
       const [cx, cy] = project([g.lng, g.lat]); // block/zone centroid
 
       const widthSampleLat = g.widthSampleLat ?? g.lat;
