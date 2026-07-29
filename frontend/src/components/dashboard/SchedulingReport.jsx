@@ -158,7 +158,7 @@ export function SchedulingReport({ onClose, embedded = false }) {
           scheduleStatus === "blocked"
             ? getRootCauseBlockers(item, constructionItemsTemplate, allVillaStatuses[r.villaID] ?? {})
             : [];
-        results.push({ item, villaID: r.villaID, scheduleStatus, blockingPredecessors });
+        results.push({ item, villaID: r.villaID, plannedStartDate: r.plannedStartDate, scheduleStatus, blockingPredecessors });
       });
     });
     return results;
@@ -325,6 +325,42 @@ export function SchedulingReport({ onClose, embedded = false }) {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, sheet, "Scheduling Overview");
     XLSX.writeFile(wb, `scheduling_overview_${cutoffDate}.xlsx`);
+  }
+
+  // The counts-per-item summary above is useful as a bird's-eye view,
+  // but once you've filtered down to a specific status (e.g. "ready"),
+  // what's actually useful is which SPECIFIC villas those are — a
+  // total doesn't tell you that. This exports the underlying per-
+  // (item, villa) rows directly instead of the rolled-up counts, for
+  // whatever status(es)/zone/block/villa filters are currently applied
+  // — works the same way regardless of which status you've filtered to.
+  function handleExportOverviewDetails() {
+    const exportRows = overviewFindings.map((f) => ({
+      Item: f.item.name,
+      "Item ID": f.item.TableItemID,
+      Villa: f.villaID,
+      "Villa Number": getVillaNumber(f.villaID),
+      Zone: villaMetaByID[f.villaID]?.zonenum ?? "",
+      Block: villaMetaByID[f.villaID]?.blocknum ?? "",
+      "Villa Type": villaMetaByID[f.villaID]?.villatype ?? "",
+      "Schedule Status": f.scheduleStatus ?? "—",
+      "Planned Start": toExcelDate(f.plannedStartDate),
+      "Blocked By": f.blockingPredecessors
+        .map((p) => `${p.name} (${p.status})`)
+        .join("; "),
+      "Blocker Notes": f.blockingPredecessors
+        .flatMap((p) =>
+          allNotes
+            .filter((n) => n.villaID === f.villaID && n.tableItemId === p.TableItemID)
+            .map((n) => `${p.name} — ${n.noteDate}: ${n.note}`)
+        )
+        .join(" | "),
+    }));
+    const sheet = XLSX.utils.json_to_sheet(exportRows, { cellDates: true });
+    applyDateCellFormat(sheet);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, sheet, "Scheduling Detail");
+    XLSX.writeFile(wb, `scheduling_overview_detail_${cutoffDate}.xlsx`);
   }
 
   const content = (
@@ -494,7 +530,12 @@ export function SchedulingReport({ onClose, embedded = false }) {
             </button>
             {overviewByItem.length > 0 && (
               <button type="button" className="admin-btn-secondary" onClick={handleExportOverview}>
-                Export to Excel
+                Export Summary
+              </button>
+            )}
+            {overviewFindings.length > 0 && (
+              <button type="button" className="admin-btn-secondary" onClick={handleExportOverviewDetails}>
+                Export Details
               </button>
             )}
           </div>
