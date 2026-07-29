@@ -3,10 +3,12 @@ import * as XLSX from "xlsx";
 import { villasApi } from "../../api/villas.js";
 import { constructionItemsApi } from "../../api/constructionItems.js";
 import { useVillaGeoMeta } from "../../hooks/useVillaGeoMeta.js";
-import { getZoneOptions, getBlockOptions, getVillaTypeOptions, getVillaOptions, matchesGeoFilters, matchesMultiSelect, matchesDateRange } from "../../utils/qualityFilterUtils.js";
+import { getZoneOptions, getBlockOptions, getVillaTypeOptions, getVillaOptions, matchesGeoFilters, matchesMultiSelect, matchesDateRange, sortRows } from "../../utils/qualityFilterUtils.js";
 import { getVillaNumber, toExcelDate, applyDateCellFormat } from "../../utils/dashboardUtils.js";
+import { useTableSort } from "../../utils/useTableSort.js";
 import { StatusCountChart } from "./StatusCountChart.jsx";
 import { MultiSelectFilter } from "./MultiSelectFilter.jsx";
+import { SortableTh } from "./SortableTh.jsx";
 
 /**
  * Surfaces every NCR across the whole project — an item can now have
@@ -103,6 +105,24 @@ export function NcrReport({ onClose, embedded = false }) {
       return true;
     });
   }, [findings, villaFilters, zoneFilters, blockFilters, villaTypeFilters, itemFilter, dateFrom, dateTo, statusFilters, villaMetaByID]);
+
+  const { sortKey, sortDir, toggleSort } = useTableSort();
+  const sortedFiltered = useMemo(() => {
+    return sortRows(filtered, sortKey, sortDir, (f, key) => {
+      switch (key) {
+        case "villa": return f.villaID;
+        case "zone": return villaMetaByID[f.villaID]?.zonenum ?? null;
+        case "block": return villaMetaByID[f.villaID]?.blocknum ?? null;
+        case "item": return f.item.name;
+        case "date": return f.date;
+        case "reason": return f.note;
+        case "closed": return f.closed ? 1 : 0;
+        case "closedDate": return f.closedDate;
+        case "closingReason": return f.closingNote;
+        default: return null;
+      }
+    });
+  }, [filtered, sortKey, sortDir, villaMetaByID]);
 
   function handleExport() {
     const exportRows = filtered.map((f) => ({
@@ -226,19 +246,19 @@ export function NcrReport({ onClose, embedded = false }) {
               <table className="dashboard-table">
                 <thead>
                   <tr>
-                    <th>Villa</th>
-                    <th>Zone</th>
-                    <th>Block</th>
-                    <th>Item</th>
-                    <th>Date</th>
-                    <th>Reason</th>
-                    <th>Closed</th>
-                    <th>Closed Date</th>
-                    <th>Closing Reason</th>
+                    <SortableTh column="villa" label="Villa" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                    <SortableTh column="zone" label="Zone" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                    <SortableTh column="block" label="Block" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                    <SortableTh column="item" label="Item" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                    <SortableTh column="date" label="Date" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                    <SortableTh column="reason" label="Reason" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                    <SortableTh column="closed" label="Closed" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                    <SortableTh column="closedDate" label="Closed Date" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                    <SortableTh column="closingReason" label="Closing Reason" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map((f) => (
+                  {sortedFiltered.map((f) => (
                     <tr key={f.id}>
                       <td>{f.villaID}</td>
                       <td>{villaMetaByID[f.villaID]?.zonenum ?? "—"}</td>

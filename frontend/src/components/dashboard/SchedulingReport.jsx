@@ -14,10 +14,13 @@ import {
   matchesGeoFilters,
   matchesMultiSelect,
   getRootCauseBlockers,
+  sortRows,
 } from "../../utils/qualityFilterUtils.js";
 import { getVillaNumber, toExcelDate, applyDateCellFormat } from "../../utils/dashboardUtils.js";
+import { useTableSort } from "../../utils/useTableSort.js";
 import { StatusCountChart } from "./StatusCountChart.jsx";
 import { MultiSelectFilter } from "./MultiSelectFilter.jsx";
+import { SortableTh } from "./SortableTh.jsx";
 import { ConstructionItemSelect } from "../panels/ConstructionItemSelect.jsx";
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -204,6 +207,26 @@ export function SchedulingReport({ onClose, embedded = false }) {
     return [...map.values()];
   }, [overviewFindings, allNotes]);
 
+  // Separate sort state from the single-item table below — different
+  // columns entirely (counts per status, not per-row data), so this
+  // needs its own useTableSort() instance, not the same one.
+  const { sortKey: overviewSortKey, sortDir: overviewSortDir, toggleSort: toggleOverviewSort } = useTableSort();
+  const sortedOverviewByItem = useMemo(() => {
+    return sortRows(overviewByItem, overviewSortKey, overviewSortDir, (e, key) => {
+      switch (key) {
+        case "item": return e.item.name;
+        case "ready": return e.counts.ready ?? 0;
+        case "blocked": return e.counts.blocked ?? 0;
+        case "notStarted": return e.counts.NotStarted ?? 0;
+        case "inProgress": return e.counts.InProgress ?? 0;
+        case "completed": return e.counts.Completed ?? 0;
+        case "total": return Object.values(e.counts).reduce((a, b) => a + b, 0);
+        case "blockedBy": return [...e.blockers.values()].map((b) => b.name).join(", ");
+        default: return null;
+      }
+    });
+  }, [overviewByItem, overviewSortKey, overviewSortDir]);
+
   // Every real villa gets a row (not just the ones the backend has cost
   // data for), same "missing villa -> zero-cost/NotStarted placeholder"
   // fix ConstructionItemDashboard.jsx already applies for the same
@@ -282,6 +305,22 @@ export function SchedulingReport({ onClose, embedded = false }) {
       return true;
     });
   }, [findings, villaFilters, zoneFilters, blockFilters, villaTypeFilters, statusFilters, villaMetaByID]);
+
+  const { sortKey, sortDir, toggleSort } = useTableSort();
+  const sortedFiltered = useMemo(() => {
+    return sortRows(filtered, sortKey, sortDir, (f, key) => {
+      switch (key) {
+        case "villa": return f.villaID;
+        case "zone": return villaMetaByID[f.villaID]?.zonenum ?? null;
+        case "block": return villaMetaByID[f.villaID]?.blocknum ?? null;
+        case "scheduleStatus": return f.scheduleStatus;
+        case "blockedBy": return f.blockingPredecessors.map((p) => p.name).join(", ");
+        case "plannedStart": return f.plannedStartDate;
+        case "notes": return f.notes.map((n) => n.note).join(", ");
+        default: return null;
+      }
+    });
+  }, [filtered, sortKey, sortDir, villaMetaByID]);
 
   function handleExport() {
     const exportRows = filtered.map((f) => ({
@@ -436,17 +475,17 @@ export function SchedulingReport({ onClose, embedded = false }) {
             <table className="dashboard-table">
               <thead>
                 <tr>
-                  <th>Villa</th>
-                  <th>Zone</th>
-                  <th>Block</th>
-                  <th>Schedule Status</th>
-                  <th>Blocked By</th>
-                  <th>Planned Start</th>
-                  <th>Notes</th>
+                  <SortableTh column="villa" label="Villa" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                  <SortableTh column="zone" label="Zone" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                  <SortableTh column="block" label="Block" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                  <SortableTh column="scheduleStatus" label="Schedule Status" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                  <SortableTh column="blockedBy" label="Blocked By" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                  <SortableTh column="plannedStart" label="Planned Start" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                  <SortableTh column="notes" label="Notes" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((f) => (
+                {sortedFiltered.map((f) => (
                   <tr key={f.villaID}>
                     <td>{f.villaID}</td>
                     <td>{villaMetaByID[f.villaID]?.zonenum ?? "—"}</td>
@@ -561,18 +600,18 @@ export function SchedulingReport({ onClose, embedded = false }) {
                 <table className="dashboard-table">
                   <thead>
                     <tr>
-                      <th>Item</th>
-                      <th>Ready</th>
-                      <th>Blocked</th>
-                      <th>NotStarted</th>
-                      <th>InProgress</th>
-                      <th>Completed</th>
-                      <th>Total</th>
-                      <th>Blocked By</th>
+                      <SortableTh column="item" label="Item" sortKey={overviewSortKey} sortDir={overviewSortDir} onSort={toggleOverviewSort} />
+                      <SortableTh column="ready" label="Ready" sortKey={overviewSortKey} sortDir={overviewSortDir} onSort={toggleOverviewSort} />
+                      <SortableTh column="blocked" label="Blocked" sortKey={overviewSortKey} sortDir={overviewSortDir} onSort={toggleOverviewSort} />
+                      <SortableTh column="notStarted" label="NotStarted" sortKey={overviewSortKey} sortDir={overviewSortDir} onSort={toggleOverviewSort} />
+                      <SortableTh column="inProgress" label="InProgress" sortKey={overviewSortKey} sortDir={overviewSortDir} onSort={toggleOverviewSort} />
+                      <SortableTh column="completed" label="Completed" sortKey={overviewSortKey} sortDir={overviewSortDir} onSort={toggleOverviewSort} />
+                      <SortableTh column="total" label="Total" sortKey={overviewSortKey} sortDir={overviewSortDir} onSort={toggleOverviewSort} />
+                      <SortableTh column="blockedBy" label="Blocked By" sortKey={overviewSortKey} sortDir={overviewSortDir} onSort={toggleOverviewSort} />
                     </tr>
                   </thead>
                   <tbody>
-                    {overviewByItem.map((e) => {
+                    {sortedOverviewByItem.map((e) => {
                       const total = Object.values(e.counts).reduce((a, b) => a + b, 0);
                       return (
                         <tr key={e.item.TableItemID}>

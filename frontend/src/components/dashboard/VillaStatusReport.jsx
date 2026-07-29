@@ -3,10 +3,12 @@ import * as XLSX from "xlsx";
 import { villasApi } from "../../api/villas.js";
 import { constructionItemsApi } from "../../api/constructionItems.js";
 import { useVillaGeoMeta } from "../../hooks/useVillaGeoMeta.js";
-import { getZoneOptions, getBlockOptions, getVillaTypeOptions, getVillaOptions, matchesGeoFilters, matchesMultiSelect, matchesDateRange } from "../../utils/qualityFilterUtils.js";
+import { getZoneOptions, getBlockOptions, getVillaTypeOptions, getVillaOptions, matchesGeoFilters, matchesMultiSelect, matchesDateRange, sortRows } from "../../utils/qualityFilterUtils.js";
 import { getVillaNumber, toExcelDate, applyDateCellFormat } from "../../utils/dashboardUtils.js";
+import { useTableSort } from "../../utils/useTableSort.js";
 import { StatusCountChart } from "./StatusCountChart.jsx";
 import { MultiSelectFilter } from "./MultiSelectFilter.jsx";
+import { SortableTh } from "./SortableTh.jsx";
 
 const ALL_STATUSES = ["NotStarted", "InProgress", "Notes", "NCR", "Rejected", "Completed"];
 
@@ -89,6 +91,22 @@ export function VillaStatusReport({ onClose, embedded = false }) {
       return true;
     });
   }, [findings, villaFilters, zoneFilters, blockFilters, villaTypeFilters, itemFilter, statusFilters, dateFrom, dateTo, villaMetaByID]);
+
+  const { sortKey, sortDir, toggleSort } = useTableSort();
+  const sortedFiltered = useMemo(() => {
+    return sortRows(filtered, sortKey, sortDir, (f, key) => {
+      switch (key) {
+        case "villa": return f.villaID;
+        case "zone": return villaMetaByID[f.villaID]?.zonenum ?? null;
+        case "block": return villaMetaByID[f.villaID]?.blocknum ?? null;
+        case "item": return f.item.name;
+        case "status": return f.status;
+        case "date": return f.date;
+        case "notes": return f.note;
+        default: return null;
+      }
+    });
+  }, [filtered, sortKey, sortDir, villaMetaByID]);
 
   function handleExport() {
     const exportRows = filtered.map((f) => ({
@@ -178,17 +196,17 @@ export function VillaStatusReport({ onClose, embedded = false }) {
               <table className="dashboard-table">
                 <thead>
                   <tr>
-                    <th>Villa</th>
-                    <th>Zone</th>
-                    <th>Block</th>
-                    <th>Item</th>
-                    <th>Status</th>
-                    <th>Date</th>
-                    <th>Notes</th>
+                    <SortableTh column="villa" label="Villa" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                    <SortableTh column="zone" label="Zone" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                    <SortableTh column="block" label="Block" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                    <SortableTh column="item" label="Item" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                    <SortableTh column="status" label="Status" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                    <SortableTh column="date" label="Date" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                    <SortableTh column="notes" label="Notes" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map((f) => (
+                  {sortedFiltered.map((f) => (
                     <tr key={`${f.villaID}-${f.item.TableItemID}`}>
                       <td>{f.villaID}</td>
                       <td>{villaMetaByID[f.villaID]?.zonenum ?? "—"}</td>

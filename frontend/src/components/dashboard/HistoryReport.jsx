@@ -11,9 +11,12 @@ import {
   matchesGeoFilters,
   matchesMultiSelect,
   matchesDateRange,
+  sortRows,
 } from "../../utils/qualityFilterUtils.js";
 import { getVillaNumber, toExcelDate, applyDateCellFormat } from "../../utils/dashboardUtils.js";
+import { useTableSort } from "../../utils/useTableSort.js";
 import { MultiSelectFilter } from "./MultiSelectFilter.jsx";
+import { SortableTh } from "./SortableTh.jsx";
 
 const ENTITY_LABELS = {
   activity_status: "Activity Status",
@@ -160,6 +163,23 @@ export function HistoryReport({ onClose, embedded = false }) {
     villaMetaByID,
   ]);
 
+  const { sortKey, sortDir, toggleSort } = useTableSort("dateTime", "desc");
+  const sortedFiltered = useMemo(() => {
+    return sortRows(filtered, sortKey, sortDir, (f, key) => {
+      switch (key) {
+        case "dateTime": return f.createdAt;
+        case "user": return f.changedBy;
+        case "villa": return f.villaID;
+        case "item": return f.item?.name ?? null;
+        case "entity": return ENTITY_LABELS[f.entityType] ?? f.entityType;
+        case "details": return formatFieldLabel(f.field);
+        case "action": return f.action;
+        case "value": return f.newValue ?? f.oldValue;
+        default: return null;
+      }
+    });
+  }, [filtered, sortKey, sortDir]);
+
   function handleExport() {
     const exportRows = filtered.map((f) => ({
       "Date/Time": toExcelDate(f.createdAt),
@@ -253,18 +273,18 @@ export function HistoryReport({ onClose, embedded = false }) {
               <table className="dashboard-table">
                 <thead>
                   <tr>
-                    <th>Date/Time</th>
-                    <th>User</th>
-                    <th>Villa</th>
-                    <th>Item</th>
-                    <th>Entity</th>
-                    <th>Details</th>
-                    <th>Action</th>
-                    <th>Old → New</th>
+                    <SortableTh column="dateTime" label="Date/Time" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                    <SortableTh column="user" label="User" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                    <SortableTh column="villa" label="Villa" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                    <SortableTh column="item" label="Item" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                    <SortableTh column="entity" label="Entity" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                    <SortableTh column="details" label="Details" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                    <SortableTh column="action" label="Action" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                    <SortableTh column="value" label="Old → New" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map((f) => (
+                  {sortedFiltered.map((f) => (
                     <tr key={f.id}>
                       <td>{formatDateTime(f.createdAt)}</td>
                       <td>{f.changedBy ?? "—"}</td>

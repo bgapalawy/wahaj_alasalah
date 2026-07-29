@@ -3,10 +3,12 @@ import * as XLSX from "xlsx";
 import { useAllVillaStatuses } from "../../hooks/useAllVillaStatuses.js";
 import { constructionItemsApi } from "../../api/constructionItems.js";
 import { useVillaGeoMeta } from "../../hooks/useVillaGeoMeta.js";
-import { getZoneOptions, getBlockOptions, getVillaTypeOptions, getVillaOptions, matchesGeoFilters, matchesMultiSelect, getRootCauseBlockers } from "../../utils/qualityFilterUtils.js";
+import { getZoneOptions, getBlockOptions, getVillaTypeOptions, getVillaOptions, matchesGeoFilters, matchesMultiSelect, getRootCauseBlockers, sortRows } from "../../utils/qualityFilterUtils.js";
 import { getVillaNumber } from "../../utils/dashboardUtils.js";
+import { useTableSort } from "../../utils/useTableSort.js";
 import { StatusCountChart } from "./StatusCountChart.jsx";
 import { MultiSelectFilter } from "./MultiSelectFilter.jsx";
+import { SortableTh } from "./SortableTh.jsx";
 
 const STATUS_OPTIONS = [
   { value: "Completed", label: "Completed" },
@@ -119,6 +121,21 @@ export function LastItemReport({ onClose, embedded = false }) {
     });
   }, [findings, villaFilters, zoneFilters, blockFilters, villaTypeFilters, itemFilter, statusFilters, villaMetaByID]);
 
+  const { sortKey, sortDir, toggleSort } = useTableSort();
+  const sortedFiltered = useMemo(() => {
+    return sortRows(filtered, sortKey, sortDir, (f, key) => {
+      switch (key) {
+        case "villa": return f.villaID;
+        case "zone": return villaMetaByID[f.villaID]?.zonenum ?? null;
+        case "block": return villaMetaByID[f.villaID]?.blocknum ?? null;
+        case "lastItem": return f.item?.name ?? null;
+        case "category": return f.item ? getCategory(f.item.TableItemID) : null;
+        case "status": return f.itemStatus;
+        default: return null;
+      }
+    });
+  }, [filtered, sortKey, sortDir, villaMetaByID]);
+
   function handleExport() {
     const exportRows = filtered.map((f) => ({
       Villa: f.villaID,
@@ -199,16 +216,16 @@ export function LastItemReport({ onClose, embedded = false }) {
               <table className="dashboard-table">
                 <thead>
                   <tr>
-                    <th>Villa</th>
-                    <th>Zone</th>
-                    <th>Block</th>
-                    <th>Last Item</th>
-                    <th>Category</th>
-                    <th>Status</th>
+                    <SortableTh column="villa" label="Villa" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                    <SortableTh column="zone" label="Zone" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                    <SortableTh column="block" label="Block" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                    <SortableTh column="lastItem" label="Last Item" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                    <SortableTh column="category" label="Category" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                    <SortableTh column="status" label="Status" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map((f) => (
+                  {sortedFiltered.map((f) => (
                     <tr key={`${f.villaID}-${f.item?.TableItemID ?? "none"}`}>
                       <td>{f.villaID}</td>
                       <td>{villaMetaByID[f.villaID]?.zonenum ?? "—"}</td>

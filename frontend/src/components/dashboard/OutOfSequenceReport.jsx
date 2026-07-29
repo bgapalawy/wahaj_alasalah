@@ -4,10 +4,12 @@ import { useAllVillaStatuses } from "../../hooks/useAllVillaStatuses.js";
 import { constructionItemsApi } from "../../api/constructionItems.js";
 import { findOutOfSequenceItems } from "../../utils/outOfSequenceUtils.js";
 import { useVillaGeoMeta } from "../../hooks/useVillaGeoMeta.js";
-import { getZoneOptions, getBlockOptions, getVillaTypeOptions, getVillaOptions, matchesGeoFilters, matchesMultiSelect } from "../../utils/qualityFilterUtils.js";
+import { getZoneOptions, getBlockOptions, getVillaTypeOptions, getVillaOptions, matchesGeoFilters, matchesMultiSelect, sortRows } from "../../utils/qualityFilterUtils.js";
 import { getVillaNumber } from "../../utils/dashboardUtils.js";
+import { useTableSort } from "../../utils/useTableSort.js";
 import { StatusCountChart } from "./StatusCountChart.jsx";
 import { MultiSelectFilter } from "./MultiSelectFilter.jsx";
+import { SortableTh } from "./SortableTh.jsx";
 
 /**
  * Surfaces every (villa, item) where an item is marked Completed while
@@ -77,6 +79,21 @@ export function OutOfSequenceReport({ onClose, embedded = false }) {
       return true;
     });
   }, [findings, villaFilters, zoneFilters, blockFilters, villaTypeFilters, itemFilter, statusFilters, villaMetaByID]);
+
+  const { sortKey, sortDir, toggleSort } = useTableSort();
+  const sortedFiltered = useMemo(() => {
+    return sortRows(filtered, sortKey, sortDir, (f, key) => {
+      switch (key) {
+        case "villa": return f.villaID;
+        case "zone": return villaMetaByID[f.villaID]?.zonenum ?? null;
+        case "block": return villaMetaByID[f.villaID]?.blocknum ?? null;
+        case "completedItem": return f.item.name;
+        case "predecessors":
+          return f.incompletePredecessors.map((p) => p.name).join(", ");
+        default: return null;
+      }
+    });
+  }, [filtered, sortKey, sortDir, villaMetaByID]);
 
   function handleExport() {
     const rows = filtered.map((f) => ({
@@ -161,15 +178,15 @@ export function OutOfSequenceReport({ onClose, embedded = false }) {
               <table className="dashboard-table">
                 <thead>
                   <tr>
-                    <th>Villa</th>
-                    <th>Zone</th>
-                    <th>Block</th>
-                    <th>Completed Item</th>
-                    <th>Incomplete Predecessor(s)</th>
+                    <SortableTh column="villa" label="Villa" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                    <SortableTh column="zone" label="Zone" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                    <SortableTh column="block" label="Block" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                    <SortableTh column="completedItem" label="Completed Item" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                    <SortableTh column="predecessors" label="Incomplete Predecessor(s)" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map((f) => (
+                  {sortedFiltered.map((f) => (
                     <tr key={`${f.villaID}-${f.item.TableItemID}`}>
                       <td>{f.villaID}</td>
                       <td>{villaMetaByID[f.villaID]?.zonenum ?? "—"}</td>

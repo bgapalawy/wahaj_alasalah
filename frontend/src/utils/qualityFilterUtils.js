@@ -148,3 +148,33 @@ export function getRootCauseBlockers(targetItem, constructionItemsTemplate, flat
   const blocking = findRootCauseBlockingActivities(targetItem.id, activitiesWithStatus);
   return blocking.filter((b) => b.id !== targetItem.id);
 }
+
+/**
+ * Sorts `rows` by whatever `getValue(row)` returns for the current sort
+ * key — shared by every Quality dashboard table's clickable column
+ * headers (see useTableSort.js + SortableTh.jsx) so all of them sort
+ * the same way instead of six slightly different implementations.
+ * Strings sort case-insensitively; numbers/dates (anything not a
+ * string) sort by plain comparison; nullish values always sort to the
+ * end regardless of direction, so an empty "—" cell doesn't jump to the
+ * top on a descending sort.
+ */
+export function sortRows(rows, sortKey, sortDir, getValue) {
+  if (!sortKey) return rows;
+  const dir = sortDir === "asc" ? 1 : -1;
+  return [...rows].sort((a, b) => {
+    const av = getValue(a, sortKey);
+    const bv = getValue(b, sortKey);
+    const aEmpty = av == null || av === "";
+    const bEmpty = bv == null || bv === "";
+    if (aEmpty && bEmpty) return 0;
+    if (aEmpty) return 1;
+    if (bEmpty) return -1;
+    if (typeof av === "string" || typeof bv === "string") {
+      return String(av).localeCompare(String(bv), undefined, { numeric: true }) * dir;
+    }
+    if (av < bv) return -1 * dir;
+    if (av > bv) return 1 * dir;
+    return 0;
+  });
+}
