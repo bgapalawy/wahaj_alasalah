@@ -40,7 +40,6 @@ export function NcrReport({ onClose, embedded = false }) {
   // "Open", "Closed", or both can be picked, consistent with every
   // other status filter across the Quality tabs.
   const [statusFilters, setStatusFilters] = useState(["Open"]);
-  const [clearing, setClearing] = useState(false);
 
   function loadReport() {
     setStatus("loading");
@@ -146,30 +145,6 @@ export function NcrReport({ onClose, embedded = false }) {
     XLSX.writeFile(wb, "ncr_report.xlsx");
   }
 
-  // Destructive, project-wide, no undo — double confirmation (the typed
-  // count is a real deterrent against a reflexive click, not just a
-  // second "are you sure").
-  async function handleClearAll() {
-    if (rows.length === 0) return;
-    const confirmed = window.confirm(
-      `This permanently deletes all ${rows.length} NCR${rows.length === 1 ? "" : "s"} across the ` +
-        `whole project (open and closed) — not just what's currently filtered/shown. This cannot be undone. Continue?`
-    );
-    if (!confirmed) return;
-    const typed = window.prompt(`Type the number ${rows.length} to confirm.`);
-    if (typed !== String(rows.length)) return;
-
-    setClearing(true);
-    try {
-      await villasApi.clearNcrReport();
-      loadReport();
-    } catch {
-      window.alert("Couldn't clear NCR data — please try again.");
-    } finally {
-      setClearing(false);
-    }
-  }
-
   const isLoading = status === "loading" || constructionItemsTemplate.length === 0;
 
   const content = (
@@ -221,15 +196,6 @@ export function NcrReport({ onClose, embedded = false }) {
             </label>
             <button type="button" className="admin-btn-secondary" onClick={handleExport} disabled={filtered.length === 0}>
               Export to Excel
-            </button>
-            <button
-              type="button"
-              className="admin-btn-secondary"
-              style={{ color: "#dc2626", borderColor: "#dc2626" }}
-              onClick={handleClearAll}
-              disabled={rows.length === 0 || clearing}
-            >
-              {clearing ? "Clearing…" : "Clear all NCR data"}
             </button>
           </div>
 
