@@ -7,6 +7,7 @@ import { VillaDetailsPanel } from "./components/panels/VillaDetailsPanel.jsx";
 import { useDraggable } from "./hooks/useDraggable.js";
 import { useLoggedInUser, logout } from "./components/auth/AuthGate.jsx";
 import { ContactDeveloperModal } from "./components/header/ContactDeveloperModal.jsx";
+import { projectConfig } from "./config/projectConfig.js";
 import "./styles/app.css";
 
 // Chart.js + xlsx are heavy — only load when the project dashboard opens.
@@ -111,7 +112,7 @@ export default function App() {
     try {
       const ctx = mapViewRef.current?.getPrintContext();
       const branding = await getBrandingForPdf();
-      if (ctx) await downloadVectorLayoutPdf({ ...ctx, ...branding, paperSize, drawnBy: loggedInUser }, "ShamsElGhroub_SiteMap");
+      if (ctx) await downloadVectorLayoutPdf({ ...ctx, ...branding, paperSize, drawnBy: loggedInUser }, `${projectConfig.fileNamePrefix}_SiteMap`);
     } finally {
       setExportingPdf(false);
     }
@@ -135,7 +136,7 @@ export default function App() {
     try {
       const ctx = mapViewRef.current?.getPrintContext({ printWindow });
       const branding = await getBrandingForPdf();
-      if (ctx) await downloadVectorLayoutPdf({ ...ctx, ...branding, paperSize, drawnBy: loggedInUser }, "ShamsElGhroub_SelectedArea");
+      if (ctx) await downloadVectorLayoutPdf({ ...ctx, ...branding, paperSize, drawnBy: loggedInUser }, `${projectConfig.fileNamePrefix}_SelectedArea`);
     } finally {
       setExportingPdf(false);
     }
@@ -144,7 +145,7 @@ export default function App() {
   return (
     <div className="app-shell">
       <header className="app-header">
-        <h1>Sahms ElGhroub</h1>
+        <h1>{projectConfig.displayName}</h1>
         <div className="app-header-actions">
           {/* Single icon groups all three printing controls (paper size,
               Print Area, Download PDF) behind one button instead of

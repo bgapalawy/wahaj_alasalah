@@ -6,6 +6,7 @@ import { BoundaryLayer } from "./BoundaryLayer.jsx";
 import { MapItemColorControl } from "./MapItemColorControl.jsx";
 import { ProjectBranding } from "./ProjectBranding.jsx";
 import { MAP_DEFAULTS, GEOJSON_URL, BOUNDARY_GEOJSON_URL } from "../../config/mapConfig.js";
+import { projectConfig } from "../../config/projectConfig.js";
 import { cachedJsonFetch } from "../../utils/cachedFetch.js";
 import { useConstructionItemData } from "../../hooks/useConstructionItemData.js";
 import { useAllVillaStatuses } from "../../hooks/useAllVillaStatuses.js";
@@ -350,7 +351,7 @@ export const MapView = forwardRef(function MapView(
         highlightVillaIDs: highlightShowBorder ? highlightVillaIDs : null,
         customQueryVillaIDs,
         customQueryColors: customQueryConditions.length > 0 ? getColors("customQuery") : null,
-        titleText: "Sahms ElGhroub — Site Map",
+        titleText: `${projectConfig.displayName}${projectConfig.pdfTitleSuffix}`,
         filterSummaryLines,
         itemNameArabic: customQueryConditions.length === 0 ? (colorByItem?.nameArabic ?? null) : null,
         subtitleText: customQueryConditions.length > 0

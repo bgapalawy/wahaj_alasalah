@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { getStoredToken, getStoredUsername, setStoredAuth } from "../../api/client.js";
+import { projectConfig } from "../../config/projectConfig.js";
 
 /**
  * Wraps the whole app. Nothing inside renders until there's a valid
@@ -57,7 +58,7 @@ export function AuthGate({ children }) {
   return (
     <div className="auth-gate">
       <form className="auth-gate-card" onSubmit={handleSubmit}>
-        <h1>Sahms ElGhroub</h1>
+        <h1>{projectConfig.displayName}</h1>
         <p>Sign in to continue.</p>
         <input
           type="text"

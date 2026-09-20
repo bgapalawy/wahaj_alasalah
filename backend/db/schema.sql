@@ -1,23 +1,29 @@
--- Shams El Ghroub — Postgres schema (Neon)
+-- WAHJ Alasalah — Postgres schema (Neon), fresh database
 --
--- Replaces several DynamoDB "wide" tables (one row per villa, one COLUMN
--- per construction item, e.g. "Civil-1", "Mechanical-1", ...) with proper
--- normalized tables. This is what makes the Custom Query Builder a real
--- WHERE clause, dashboards a real GROUP BY, and the bulk invoice-fix
--- buttons a single UPDATE statement instead of scan-then-loop-and-write.
+-- Consolidates the original 8 migration files (schema.sql,
+-- schema-users.sql, schema-project-settings.sql + v2,
+-- migration_status_history.sql, migration_ncr_table.sql +
+-- migration_ncr_closing_note.sql, migration_schedule_notes.sql,
+-- migration_audit_log.sql) into one file, in the correct dependency
+-- order, for setting up a brand-new project's database in one pass —
+-- rather than re-running 8 separate ALTER-heavy migration files that
+-- were written incrementally against an already-live Shams database.
+--
+-- NOT included: cleanup-actual-costs.sql / cleanup-actual-dates.sql —
+-- those were one-time backfills for pre-existing bad data on the old
+-- Shams database. A fresh database has no rows yet, so there's nothing
+-- for them to clean up.
 --
 -- Run once against a fresh Neon database:
---   psql "$DATABASE_URL" -f db/schema.sql
+--   psql "postgresql://neondb_owner:npg_gWb6j8ZNkrGa@ep-sweet-salad-b45u33cb-pooler.c-6.us-east-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require" -f db/schema.sql
 
 BEGIN;
 
 -- ----------------------------------------------------------------------
--- villas — was: villaID-keyed rows in DDB_VILLAS_TABLE
+-- villas
 -- ----------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS villas (
-  villa_id    TEXT PRIMARY KEY,   -- "V_993" — kept identical to DynamoDB's
-                                   -- key so the frontend/routes never need
-                                   -- to know the migration happened
+  villa_id    TEXT PRIMARY KEY,   -- e.g. "V_993" — matches villaID in villa-parcels.geojson
   villa_num   INTEGER,
   zone        TEXT,
   block       TEXT,
@@ -32,14 +38,11 @@ CREATE INDEX IF NOT EXISTS idx_villas_villa_type ON villas (villa_type);
 CREATE INDEX IF NOT EXISTS idx_villas_villa_num ON villas (villa_num);
 
 -- ----------------------------------------------------------------------
--- construction_items — was: the static array in data/constructionItems.js
--- Kept as a real table (not hardcoded JS) so it can be queried/joined,
--- per the original ARCHITECTURE.md note calling this out as "a good
--- candidate to move into the database itself later."
+-- construction_items
 -- ----------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS construction_items (
-  table_item_id TEXT PRIMARY KEY,   -- "Civil-1"
-  item_id       INTEGER NOT NULL,   -- 1..82, the original ordering
+  table_item_id TEXT PRIMARY KEY,   -- e.g. "Civil-1"
+  item_id       INTEGER NOT NULL,   -- ordering, matches data/constructionItems.js's `id`
   name          TEXT NOT NULL,
   name_arabic   TEXT,
   predecessors  INTEGER[] NOT NULL DEFAULT '{}'
@@ -48,29 +51,45 @@ CREATE TABLE IF NOT EXISTS construction_items (
 CREATE INDEX IF NOT EXISTS idx_construction_items_item_id ON construction_items (item_id);
 
 -- ----------------------------------------------------------------------
--- villa_item_status — was: one column per TableItemID across
--- DDB_WAJHA_DATA_TABLE (current status), DDB_PLANNED_DATES_TABLE,
--- DDB_PLANNED_DATES_FINISH_TABLE, DDB_ACTUAL_DATES_TABLE,
--- DDB_PLANNED_COSTS_TABLE, DDB_ACTUAL_COSTS_TABLE — merged into ONE
--- long-format table, one row per (villa, item).
+-- villa_item_status
+-- (includes the `note` column from migration_status_history.sql
+-- directly, rather than as a later ALTER)
 -- ----------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS villa_item_status (
   villa_id        TEXT NOT NULL REFERENCES villas (villa_id) ON DELETE CASCADE,
   table_item_id   TEXT NOT NULL REFERENCES construction_items (table_item_id),
-  status          TEXT NOT NULL DEFAULT 'NotStarted', -- NotStarted/InProgress/Completed
+  status          TEXT NOT NULL DEFAULT 'NotStarted', -- NotStarted/InProgress/Completed/NCR/Rejected
   planned_start   DATE,
   planned_finish  DATE,
-  actual_date     DATE,             -- completion date, was Actual_dates' completedDate
+  actual_date     DATE,
   planned_cost    NUMERIC(14, 2),
   actual_cost     NUMERIC(14, 2),
+  note            TEXT,
   PRIMARY KEY (villa_id, table_item_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_vis_item_status ON villa_item_status (table_item_id, status);
 CREATE INDEX IF NOT EXISTS idx_vis_villa ON villa_item_status (villa_id);
+CREATE INDEX IF NOT EXISTS idx_villa_item_status_status ON villa_item_status (status);
 
 -- ----------------------------------------------------------------------
--- villa_item_invoice — was: DDB_INVOICE_TABLE, same wide shape
+-- villa_item_status_history — append-only log, one row per status save
+-- ----------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS villa_item_status_history (
+  id BIGSERIAL PRIMARY KEY,
+  villa_id TEXT NOT NULL,
+  table_item_id TEXT NOT NULL,
+  status TEXT NOT NULL,
+  status_date DATE,
+  note TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_villa_item_status_history_lookup
+  ON villa_item_status_history (villa_id, table_item_id, created_at);
+
+-- ----------------------------------------------------------------------
+-- villa_item_invoice
 -- ----------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS villa_item_invoice (
   villa_id       TEXT NOT NULL REFERENCES villas (villa_id) ON DELETE CASCADE,
@@ -83,10 +102,7 @@ CREATE INDEX IF NOT EXISTS idx_vii_item_status ON villa_item_invoice (table_item
 CREATE INDEX IF NOT EXISTS idx_vii_villa ON villa_item_invoice (villa_id);
 
 -- ----------------------------------------------------------------------
--- special_query_values — was: DDB_SPECIAL_QUERY_TABLE, arbitrary extra
--- per-villa columns used by the "Column" color mode / custom query
--- builder. Kept as a flexible key/value table since these columns are
--- user-defined and don't have a fixed schema.
+-- villa_special_query_values — arbitrary user-defined per-villa columns
 -- ----------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS villa_special_query_values (
   villa_id     TEXT NOT NULL REFERENCES villas (villa_id) ON DELETE CASCADE,
@@ -96,5 +112,97 @@ CREATE TABLE IF NOT EXISTS villa_special_query_values (
 );
 
 CREATE INDEX IF NOT EXISTS idx_sqv_column_value ON villa_special_query_values (column_name, value);
+
+-- ----------------------------------------------------------------------
+-- villa_item_ncr
+-- (includes closing_note from migration_ncr_closing_note.sql directly)
+-- ----------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS villa_item_ncr (
+  id BIGSERIAL PRIMARY KEY,
+  villa_id TEXT NOT NULL,
+  table_item_id TEXT NOT NULL,
+  opened_date DATE NOT NULL DEFAULT CURRENT_DATE,
+  note TEXT,
+  closed BOOLEAN NOT NULL DEFAULT FALSE,
+  closed_date DATE,
+  closing_note TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_villa_item_ncr_lookup
+  ON villa_item_ncr (villa_id, table_item_id);
+
+CREATE INDEX IF NOT EXISTS idx_villa_item_ncr_closed
+  ON villa_item_ncr (closed);
+
+-- ----------------------------------------------------------------------
+-- villa_item_schedule_note
+-- ----------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS villa_item_schedule_note (
+  id BIGSERIAL PRIMARY KEY,
+  villa_id TEXT NOT NULL,
+  table_item_id TEXT NOT NULL,
+  note TEXT NOT NULL,
+  note_date DATE NOT NULL DEFAULT CURRENT_DATE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_villa_item_schedule_note_lookup
+  ON villa_item_schedule_note (villa_id, table_item_id);
+
+-- ----------------------------------------------------------------------
+-- audit_log — shared audit trail across activity status / NCR / notes
+-- ----------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS audit_log (
+  id BIGSERIAL PRIMARY KEY,
+  villa_id TEXT,
+  table_item_id TEXT,
+  entity_type TEXT NOT NULL,
+  action TEXT NOT NULL,
+  field TEXT,
+  old_value TEXT,
+  new_value TEXT,
+  changed_by TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_log_lookup ON audit_log (villa_id, table_item_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_audit_log_entity ON audit_log (entity_type);
+CREATE INDEX IF NOT EXISTS idx_audit_log_user ON audit_log (changed_by);
+CREATE INDEX IF NOT EXISTS idx_audit_log_created ON audit_log (created_at);
+
+-- ----------------------------------------------------------------------
+-- project_settings — singleton row, shared branding (name + 5 logo captions)
+-- ----------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS project_settings (
+  id            INTEGER PRIMARY KEY DEFAULT 1,
+  project_name  TEXT,
+  logo_caption  TEXT,           -- superseded by logo_caption_1..5 below, kept for compatibility
+  logo_caption_1 TEXT,
+  logo_caption_2 TEXT,
+  logo_caption_3 TEXT,
+  logo_caption_4 TEXT,
+  logo_caption_5 TEXT,
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT single_row CHECK (id = 1)
+);
+
+-- Seeded with WAHJ's own name from the start (was "Sahms ElGhroub" in
+-- the original file — that's what caused the branding widget to show
+-- the wrong project name/logos before this project had its own database).
+INSERT INTO project_settings (id, project_name)
+VALUES (1, 'WAHJ Alasalah')
+ON CONFLICT (id) DO NOTHING;
+
+-- ----------------------------------------------------------------------
+-- users
+-- ----------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS users (
+  id            SERIAL PRIMARY KEY,
+  username      TEXT UNIQUE NOT NULL,
+  password_hash TEXT NOT NULL,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
 COMMIT;

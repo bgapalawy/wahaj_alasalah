@@ -1,4 +1,5 @@
 import { ITEM_STATUS_COLORS, ITEM_STATUS_ORDER } from "../config/itemStatusColors.js";
+import { projectConfig } from "../config/projectConfig.js";
 
 /**
  * Renders villa parcels + boundary directly onto a canvas from raw
@@ -233,7 +234,7 @@ export function renderPrintableMap({
   compositeCtx.textBaseline = "top";
   compositeCtx.fillStyle = "#1e3a8a";
   compositeCtx.font = `bold ${28 * SCALE}px sans-serif`;
-  compositeCtx.fillText(titleText ?? "Sahms ElGhroub — Site Map", marginX, 20 * SCALE);
+  compositeCtx.fillText(titleText ?? `${projectConfig.displayName}${projectConfig.pdfTitleSuffix}`, marginX, 20 * SCALE);
   if (subtitleText) {
     compositeCtx.font = `${16 * SCALE}px sans-serif`;
     compositeCtx.fillStyle = "#475569";
