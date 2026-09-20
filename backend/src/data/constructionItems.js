@@ -406,4 +406,92 @@ export const constructionItems = [
     TableItemID: "Architectural-10",
     p6Code: "MS", // real P6 code is a per-block milestone (e.g. "MS-A1"), not a numbered activity like the rest
   },
+
+  // ---------- Site-wide / general cost items — from the reference
+  // "Villa Unit Cost Breakdown" workbook, NOT from the block-level P6
+  // schedule (these have no per-block task/date in the XER — they're
+  // project-wide costs allocated per villa by villatype). No planned
+  // dates exist for these; only planned_cost is ever set. No
+  // predecessors — these aren't gated on or gating any schedule
+  // activity, they're purely a cost-tracking line. ----------
+  {
+    id: 40,
+    name: "General Requirements - Preliminaries/Mobilisation",
+    nameArabic: "المتطلبات العامة - الأعمال التمهيدية والتعبئة",
+    predecessors: [],
+    status: "NotStarted",
+    TableItemID: "General-1",
+    p6Code: null,
+    costByVillaType: { S: 800, MID: 800, END: 800 },
+  },
+  {
+    id: 41,
+    name: "NTP#1 Obligations incl. Mock-up",
+    nameArabic: "التزامات أمر المباشرة الأول شاملة الوحدة النموذجية",
+    predecessors: [],
+    status: "NotStarted",
+    TableItemID: "General-2",
+    p6Code: null,
+    costByVillaType: { S: 600, MID: 620, END: 650 },
+  },
+  {
+    id: 42,
+    name: "Earthworks (Site-wide/General)",
+    nameArabic: "أعمال الحفر والردم (عام على مستوى الموقع)",
+    predecessors: [],
+    status: "NotStarted",
+    TableItemID: "General-3",
+    p6Code: null,
+    costByVillaType: { S: 3656.36, MID: 3627.52, END: 3747.55 },
+  },
+  {
+    id: 43,
+    name: "Procurement - Superstructure (Package Batches, National Average)",
+    nameArabic: "المشتريات - الهيكل الإنشائي (دفعات، متوسط وطني)",
+    predecessors: [],
+    status: "NotStarted",
+    TableItemID: "General-4",
+    p6Code: null,
+    costByVillaType: { S: 485.99, MID: 396.98, END: 440.5 },
+  },
+  {
+    id: 44,
+    name: "MEP Second & Third Fix (Site-wide/General)",
+    nameArabic: "التأسيس الثاني والثالث للكهروميكانيكال (عام على مستوى الموقع)",
+    predecessors: [],
+    status: "NotStarted",
+    TableItemID: "General-5",
+    p6Code: null,
+    costByVillaType: { S: 607.32, MID: 556.78, END: 586.57 },
+  },
+  {
+    id: 45,
+    name: "Procurement - MEP Second & Third Fix (Package Batches, National Average)",
+    nameArabic: "المشتريات - التأسيس الثاني والثالث (دفعات، متوسط وطني)",
+    predecessors: [],
+    status: "NotStarted",
+    TableItemID: "General-6",
+    p6Code: null,
+    costByVillaType: { S: 264.29, MID: 233.34, END: 245.82 },
+  },
+  {
+    id: 46,
+    name: "Procurement - Finishes (Package Batches, National Average)",
+    nameArabic: "المشتريات - التشطيبات (دفعات، متوسط وطني)",
+    predecessors: [],
+    status: "NotStarted",
+    TableItemID: "General-7",
+    p6Code: null,
+    costByVillaType: { S: 274.01, MID: 222.66, END: 243.64 },
+  },
+  {
+    id: 47,
+    name: "Inherent Defects Insurance (IDI @1.60%)",
+    nameArabic: "تأمين العيوب الخفية (1.60%)",
+    predecessors: [],
+    status: "NotStarted",
+    TableItemID: "General-8",
+    p6Code: null,
+    costByVillaType: { S: 5009.91, MID: 4536.87, END: 4975.27 },
+  },
 ];
