@@ -6,6 +6,13 @@
 // from the static file directly — editing the file alone does nothing
 // until this is run.
 //
+// IMPORTANT: --write also clears villa_item_status entirely first (a
+// foreign key on table_item_id would otherwise block replacing an item
+// that already has status/date/cost rows against it). This is
+// deliberate — the assumption is you're about to re-upload planned
+// dates/costs/status for the new item set right after via Admin Import.
+// If that's NOT true for your situation, don't run --write yet.
+//
 // Run from the backend/ folder, with DATABASE_URL available (either via
 // a local .env that dotenv picks up, or by running this through Render's
 // Shell tab on the backend service so it uses the same DATABASE_URL the
@@ -73,6 +80,18 @@ async function main() {
     const before = await query("SELECT count(*) FROM construction_items");
     console.log(`Existing rows: ${before.rows[0].count}`);
 
+    // villa_item_status has a foreign key on table_item_id — any row
+    // referencing an old item blocks the DELETE below. Since this script
+    // is meant to be followed by a full re-upload of planned
+    // dates/costs/status for the new item set anyway (see
+    // seed-villas-from-geojson.js / the Admin Import flow), clearing it
+    // here — in the same transaction — is safe: if anything downstream
+    // fails, the rollback restores both tables together, never leaving
+    // the two out of sync with each other.
+    const statusBefore = await query("SELECT count(*) FROM villa_item_status");
+    console.log(`Clearing ${statusBefore.rows[0].count} existing villa_item_status row(s) (referencing the old item set)...`);
+    await query("DELETE FROM villa_item_status");
+
     await query("DELETE FROM construction_items");
 
     for (const item of constructionItems) {
@@ -85,9 +104,10 @@ async function main() {
 
     await query("COMMIT");
     console.log(`Done — construction_items now has ${constructionItems.length} rows.`);
+    console.log(`villa_item_status is now empty — re-upload your Planned Start / Planned Finish / Planned Cost sheets via Admin Import.`);
   } catch (err) {
     await query("ROLLBACK");
-    console.error("Failed, rolled back. Table left unchanged.");
+    console.error("Failed, rolled back. Both tables left unchanged.");
     throw err;
   }
 }
