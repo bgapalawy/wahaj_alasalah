@@ -248,16 +248,34 @@ export async function buildVectorLayoutPdf({
   const parcelStroke = hexToRgb("#2b2f33");
   const hlStroke = hexToRgb("#ea580c");
 
+  // Two passes, not one — NOT_VILLA road/common-area parcels and real
+  // villas are interleaved in whatever order they happen to sit in the
+  // source GeoJSON (often just their original digitizing order, not
+  // grouped by type). Villa parcels that are wedged along a curved
+  // road (narrow, irregular sites — a real recurring shape here) are
+  // exactly the cases most likely to geometrically overlap an adjacent
+  // road parcel from imprecise source tracing. Drawing every NOT_VILLA
+  // parcel first as a base layer, then every real villa on top,
+  // guarantees a villa's own boundary is never hidden underneath a
+  // later-drawn road parcel — independent of array order. (Labels are
+  // still collected in the villa pass and drawn afterward, as before,
+  // so numbers always sit above both layers.)
   (geojson.features ?? []).forEach((f) => {
     if (!f.geometry) return;
     const villaID = f.properties?.villaID;
-    const visible = featureVisible(f.geometry);
-
     if (!villaID || villaID === "NOT_VILLA") {
-      if (visible) drawPolyFeature(f.geometry, { fill: nonVillaFill, stroke: nonVillaStroke, lineWidth: 0.07 });
-      return;
+      if (featureVisible(f.geometry)) {
+        drawPolyFeature(f.geometry, { fill: nonVillaFill, stroke: nonVillaStroke, lineWidth: 0.07 });
+      }
     }
+  });
 
+  (geojson.features ?? []).forEach((f) => {
+    if (!f.geometry) return;
+    const villaID = f.properties?.villaID;
+    if (!villaID || villaID === "NOT_VILLA") return;
+
+    const visible = featureVisible(f.geometry);
     const isHl = highlightVillaIDs && highlightVillaIDs.has(villaID);
     let fillHex;
     if (customQueryVillaIDs && customQueryColors) {
@@ -275,7 +293,14 @@ export async function buildVectorLayoutPdf({
       drawPolyFeature(f.geometry, {
         fill: hexToRgb(fillHex),
         stroke: isHl ? hlStroke : parcelStroke,
-        lineWidth: isHl ? 0.5 : 0.08,
+        // 0.08 was nearly invisible at full-project overview scales
+        // (e.g. 1:4000 on A1 with 900+ small parcels) — especially
+        // noticeable on a project where every villa is still the same
+        // near-white "NotStarted" fill, since there's no color contrast
+        // to compensate for a faint line. 0.15 stays proportionate at
+        // zoomed-in "Print Area" exports too (isHl's 0.5 for the
+        // highlighted case is unchanged).
+        lineWidth: isHl ? 0.5 : 0.15,
       });
     }
 
@@ -540,7 +565,7 @@ export async function buildVectorLayoutPdf({
   // now-smaller parcels (fixed 1.3mm ceiling), and narrower parcels
   // (A-MID terraces especially) couldn't clear a fixed 0.7mm floor
   // once everything shrank, so they got culled instead of drawn.
-  const MIN_LEGIBLE_MM = 0.7 * Kfont;  // ~2 pt at A1 — fine on a zoomable vector PDF
+  const MIN_LEGIBLE_MM = 0.9 * Kfont;  // was 0.7 — see MAX_LABEL_MM note below
   // MAX_LABEL_MM is an ABSOLUTE ceiling with respect to PLOT scale
   // (1:3,000 vs 1:7,500 etc.) — this is what was still producing
   // "text so big" at closer plot scales like 1:3,000: with plenty of
@@ -552,7 +577,39 @@ export async function buildVectorLayoutPdf({
   // against real geometry: still 0% culled everywhere from 1:3,000
   // through 1:7,500 at this cap. It IS, however, scaled by Kfont
   // (linear paper-size factor) — see the note above MIN_LEGIBLE_MM.
-  const MAX_LABEL_MM = 1.3 * Kfont;  // sheet-wide target is capped here too, scaled per-paper like MIN_LEGIBLE_MM above
+  //
+  // Raised 1.3 -> 1.8 (was reported the OTHER direction this time: a
+  // 1:1,500 "Print Area" export on A3, with plenty of real room per
+  // parcel on the page, still hit this ceiling and read as illegibly
+  // tiny — the same tension the 3.2->1.3 change above was managing,
+  // just from the opposite side, at an even closer scale than the
+  // 1:3,000 case that motivated the original cap. Kept well under the
+  // old 3.2 that caused the original complaint. If a future report
+  // says labels are oversized again at some scale/paper combination,
+  // that's this same tension resurfacing — the real fix is likely
+  // making the ceiling a function of plot scale, not just paper size,
+  // rather than sliding this one constant back and forth again.
+  const MAX_LABEL_MM_BASE = 1.8 * Kfont;  // sheet-wide target is capped here too, scaled per-paper like MIN_LEGIBLE_MM above
+  // The flat cap above was only ever validated at overview scales
+  // (1:3,000 through 1:7,500 — see the "0% culled" note above) — it
+  // was never meant to also govern much CLOSER "Print Area" exports
+  // like 1:500 or 1:1,500, where each parcel is genuinely many times
+  // bigger on the page and a flat cap reads as illegibly tiny relative
+  // to all that empty room (the "numbers still small" report, even
+  // after the Kfont-only bump above). Below the 1:3,000 reference
+  // point, scale the ceiling up in step with how much closer the plot
+  // scale actually is — at 1:1,500 (2x closer) the cap doubles, at
+  // 1:500 (6x closer) it's 6x — while leaving the whole originally-
+  // validated 1:3,000-7,500 range completely untouched (scaleBoost
+  // clamps to 1 there, same behavior as before this change). Per-
+  // parcel fitAlong/fitAcross (computed below, from the ACTUAL
+  // projected geometry at this run's scale) remain the real backstop
+  // against overflow either way — this only raises how high the
+  // shared ceiling is allowed to go before those per-parcel fit
+  // numbers become the binding constraint instead.
+  const REFERENCE_SCALE_DEN = 3000;
+  const scaleBoost = Math.max(1, REFERENCE_SCALE_DEN / scaleDen);
+  const MAX_LABEL_MM = MAX_LABEL_MM_BASE * scaleBoost;
   const PT_PER_MM = 72 / 25.4;
 
   // Pass 1: initial angle per label (CAD angle if trustworthy, else the
