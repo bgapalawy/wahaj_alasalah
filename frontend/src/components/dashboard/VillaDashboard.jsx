@@ -83,7 +83,7 @@ export function VillaDashboard({ villaID }) {
   );
 
   const { earliestStart, latestFinish, firstActualDateRecorded, lastActualDateRecorded } = useMemo(
-    () => getProjectDateRange(activities),
+    () => getProjectDateRange(activities, { excludeGeneral: true }),
     [activities]
   );
 
@@ -193,11 +193,11 @@ export function VillaDashboard({ villaID }) {
           </div>
           <div className="summary-card">
             <span>Planned %</span>
-            <strong>{metrics.totalPlannedPercent.toFixed(1)}%</strong>
+            <strong>{metrics.totalPlannedPercent.toFixed(2)}%</strong>
           </div>
           <div className="summary-card">
             <span>Actual %</span>
-            <strong>{metrics.totalActualPercent.toFixed(1)}%</strong>
+            <strong>{metrics.totalActualPercent.toFixed(2)}%</strong>
           </div>
         </div>
       </div>
@@ -217,11 +217,11 @@ export function VillaDashboard({ villaID }) {
           </div>
           <div className="summary-card">
             <span>Planned %</span>
-            <strong>{metrics.plannedPercent.toFixed(1)}%</strong>
+            <strong>{metrics.plannedPercent.toFixed(2)}%</strong>
           </div>
           <div className="summary-card">
             <span>Actual %</span>
-            <strong>{metrics.actualPercent.toFixed(1)}%</strong>
+            <strong>{metrics.actualPercent.toFixed(2)}%</strong>
           </div>
         </div>
       </div>
@@ -339,8 +339,8 @@ export function VillaDashboard({ villaID }) {
                 <td>{formatPeriodLabel(p, viewType)}</td>
                 <td>{formatCurrency(periods[p].totalCost)}</td>
                 <td>{formatCurrency(periods[p].totalCostActual)}</td>
-                <td>{periods[p].cumPercent.toFixed(1)}%</td>
-                <td>{periods[p].cumPercentActual.toFixed(1)}%</td>
+                <td>{periods[p].cumPercent.toFixed(2)}%</td>
+                <td>{periods[p].cumPercentActual.toFixed(2)}%</td>
               </tr>
             ))}
             {sortedPeriods.length === 0 && (

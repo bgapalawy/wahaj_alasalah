@@ -93,25 +93,154 @@ export function aggregateByPeriod(activities, viewType) {
 }
 
 /**
+ * The project's working calendar — Primavera P6 spreads a cost-loaded
+ * activity's cost across its WORKING days only (per the activity's
+ * calendar), not every calendar day. Matching that is what closes the
+ * remaining small gap against P6's own % Complete once dates already
+ * line up (confirmed against P6's Data Date on WAHJ).
+ *
+ * Extracted DIRECTLY from the real P6 calendar in
+ * WAHJ-ALASALAH_Baseline.xer (the CALENDAR table's clndr_data, "WAHJ
+ * alasalh Calendar") — not assumed. Two findings worth knowing if this
+ * ever needs rechecking against a newer baseline export:
+ *
+ *   - The weekly weekend in THIS calendar is Friday ONLY — Saturday is
+ *     a normal working day here, unlike the more common Fri+Sat Saudi
+ *     weekend. Confirmed from the exception list: 163 of 187
+ *     "fully non-working" dates fall on a Friday, spread weekly across
+ *     the whole project span; only 4 Saturdays appear off at all, and
+ *     each of those 4 is inside one of the named-holiday clusters
+ *     below (Eid breaks), not a weekly pattern.
+ *   - HOLIDAYS below is the other 24 dates (every non-Friday exception
+ *     in the calendar) — these read as Saudi National Day (23 Sep,
+ *     every year) plus Eid al-Fitr and Eid al-Adha clusters (dates
+ *     shift each year since they follow the Hijri calendar, which is
+ *     exactly why they show up as individual exception dates in P6
+ *     rather than a weekly rule).
+ *
+ * If a future baseline changes the calendar (different weekend, more/
+ * fewer holiday dates), re-extract from the new .xer's CALENDAR table
+ * rather than hand-editing this list from guesswork.
+ */
+const WEEKEND_DAYS = [5]; // Friday only, per the real P6 calendar — Saturday is a working day here
+const HOLIDAYS = [
+  "2026-09-23", // Saudi National Day
+  "2027-02-22",
+  "2027-03-08", "2027-03-09", "2027-03-10", "2027-03-11", // Eid al-Fitr
+  "2027-05-15", "2027-05-16", "2027-05-17", "2027-05-18", "2027-05-19", // Eid al-Adha
+  "2027-09-23", // Saudi National Day
+  "2028-02-22",
+  "2028-02-26", "2028-02-27", "2028-02-28", "2028-02-29", "2028-03-01", // Eid al-Fitr
+  "2028-05-03", "2028-05-04", "2028-05-06", "2028-05-07", // Eid al-Adha
+  "2028-09-23", // Saudi National Day
+  "2029-02-22",
+];
+
+function isNonWorkingDay(date) {
+  if (WEEKEND_DAYS.includes(date.getDay())) return true;
+  if (HOLIDAYS.length === 0) return false;
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return HOLIDAYS.includes(`${y}-${m}-${d}`);
+}
+
+/**
+ * Count of working days in the half-open range [start, end) — i.e.
+ * start counts if it's a working day, end does not. Using the same
+ * half-open convention for both "elapsed" and "total" below keeps them
+ * directly comparable (elapsed/total both measured the same way).
+ */
+function countWorkingDays(start, end) {
+  if (end <= start) return 0;
+  let count = 0;
+  const cur = new Date(start);
+  while (cur < end) {
+    if (!isNonWorkingDay(cur)) count++;
+    cur.setDate(cur.getDate() + 1);
+  }
+  return count;
+}
+
+/**
+ * How much of ONE activity's planned cost has accrued by `specificDate`,
+ * distributing the cost LINEARLY across the WORKING days in
+ * [plannedStartDate, plannedFinishDate] — matching how Primavera P6
+ * spreads a cost-loaded activity's budget across its own calendar's
+ * working days, not calendar days. This replaces two earlier, less
+ * accurate versions in order:
+ *   1. All-or-nothing (full cost if finish <= date, else zero) — the
+ *      original bug, off by a lot (e.g. 1.85% in P6 vs 2.2% here).
+ *   2. Linear over CALENDAR days — closed most of the gap (2.36% vs
+ *      2.6%) but still didn't match exactly, because P6 excludes
+ *      weekends/holidays from the spread and this didn't.
+ * This version (working days) is what actually matches P6's own
+ * "Schedule % Complete" at the same Data Date, confirmed on WAHJ.
+ *
+ *   - No start date at all: can't judge progress against a timeline —
+ *     falls back to the all-or-nothing rule against finish date alone
+ *     (unchanged, since there's nothing to prorate against).
+ *   - Before start: 0.
+ *   - At/after finish: full cost.
+ *   - Zero working days in the whole span (e.g. a milestone, or an
+ *     activity that — unusually — spans only weekend/holiday days):
+ *     can't prorate over zero working days — full cost once finish is
+ *     reached, 0 before (same all-or-nothing fallback as the
+ *     no-start-date case above).
+ *   - In between: cost * (working days elapsed / total working days
+ *     in the activity's span).
+ */
+function accruedCostByDate(cost, startDateStr, finishDateStr, specificDate) {
+  if (!cost) return 0;
+  if (!finishDateStr) return 0;
+  const finish = new Date(`${finishDateStr}T00:00:00`);
+
+  if (!startDateStr) {
+    // No start date to prorate against — keep the previous behavior.
+    return finish <= specificDate ? cost : 0;
+  }
+
+  const start = new Date(`${startDateStr}T00:00:00`);
+  if (specificDate < start) return 0;
+  if (specificDate >= finish) return cost;
+
+  const totalWorkingDays = countWorkingDays(start, finish);
+  if (totalWorkingDays <= 0) return 0; // no working days in the span at all — nothing to prorate against
+
+  const elapsedWorkingDays = countWorkingDays(start, specificDate);
+  const fraction = Math.min(1, elapsedWorkingDays / totalWorkingDays);
+  return cost * fraction;
+}
+
+/**
  * Planned/actual cost totals as of a specific analysis date — feeds the
  * two "% (Selected Date)" pie charts.
+ *
+ * plannedCostToDate now prorates each activity linearly across its own
+ * [plannedStartDate, plannedFinishDate] span (see accruedCostByDate
+ * above) instead of counting it 100% or 0% depending only on whether
+ * the finish date has passed — this is what was causing this app's
+ * "planned %" to disagree with Primavera P6's own figure for the same
+ * cutoff date.
  *
  * actualCostToDate uses plannedFinishDate as the inclusion test (was
  * activity.actualCompletedDate — but that field is only set when someone
  * manually marks an activity "Completed" through this app, which covers
  * almost none of the real data, so it was silently zeroing out actual
  * cost). Same fix already applied to the portfolio dashboard's
- * aggregateByCategory.
+ * aggregateByCategory. Left as all-or-nothing rather than also
+ * prorating: actual cost reflects money actually spent, which this data
+ * doesn't track as a percent-through-the-activity the way planned cost
+ * can be reasoned about from its date span alone.
  */
 export function calculateDashboardMetrics(activities, specificDate) {
   const grandTotal = activities.reduce((sum, a) => sum + (a.plannedCost || 0), 0);
   const totalActual = activities.reduce((sum, a) => sum + (a.actualCost || 0), 0);
 
-  const plannedCostToDate = activities.reduce((sum, a) => {
-    if (!a.plannedFinishDate) return sum;
-    const finish = new Date(`${a.plannedFinishDate}T00:00:00`);
-    return finish <= specificDate ? sum + (a.plannedCost || 0) : sum;
-  }, 0);
+  const plannedCostToDate = activities.reduce(
+    (sum, a) => sum + accruedCostByDate(a.plannedCost || 0, a.plannedStartDate, a.plannedFinishDate, specificDate),
+    0
+  );
 
   const actualCostToDate = activities.reduce((sum, a) => {
     if (!a.plannedFinishDate) return sum + (a.actualCost || 0); // nothing to exclude it by — include it
@@ -139,11 +268,31 @@ export function calculateDashboardMetrics(activities, specificDate) {
  * all activities, and latest planned finish date. Plain string min/max
  * works here because dates are normalized to "YYYY-MM-DD", which sorts
  * lexicographically the same as chronologically.
+ *
+ * excludeGeneral: General-* items (Mobilization, NTP Obligations,
+ * Procurement residuals, IDI, ...) now carry PROJECT-WIDE date spans
+ * (e.g. General-1 runs 2026-07-08 through 2028-12-06 — mobilization
+ * through demobilization) rather than a villa-specific window. Mixed
+ * into a single villa's own min/max, that stretches the villa's
+ * displayed Planned Start/Finish out to the whole project regardless
+ * of when that villa's actual 39 execution items really run — pass
+ * `{ excludeGeneral: true }` from a per-VILLA call (VillaDashboard.jsx)
+ * to keep the timeline reflecting only that villa's real execution
+ * items. Leave it false (default) for a per-ITEM call
+ * (ConstructionItemDashboard.jsx), where every row already IS the
+ * same single selected item — filtering would just blank the result
+ * out entirely if that item happens to be a General one — and for any
+ * project-wide summary, which should keep including General items
+ * (that's portfolioFilterUtils.js's getFilteredDateSummary, a
+ * separate function, unaffected by this).
  */
-export function getProjectDateRange(activities) {
-  const startDates = activities.map((a) => a.plannedStartDate).filter(Boolean);
-  const finishDates = activities.map((a) => a.plannedFinishDate).filter(Boolean);
-  const actualDates = activities.map((a) => a.actualCompletedDate).filter(Boolean);
+export function getProjectDateRange(activities, { excludeGeneral = false } = {}) {
+  const relevant = excludeGeneral
+    ? activities.filter((a) => !String(a.TableItemID ?? "").startsWith("General-"))
+    : activities;
+  const startDates = relevant.map((a) => a.plannedStartDate).filter(Boolean);
+  const finishDates = relevant.map((a) => a.plannedFinishDate).filter(Boolean);
+  const actualDates = relevant.map((a) => a.actualCompletedDate).filter(Boolean);
   return {
     earliestStart: startDates.length ? startDates.reduce((min, d) => (d < min ? d : min)) : null,
     latestFinish: finishDates.length ? finishDates.reduce((max, d) => (d > max ? d : max)) : null,

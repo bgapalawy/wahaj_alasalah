@@ -236,7 +236,7 @@ export function ConstructionItemDashboard() {
               </div>
               <div className="summary-card">
                 <span>% Spent</span>
-                <strong>{metrics.totalActualPercent.toFixed(1)}%</strong>
+                <strong>{metrics.totalActualPercent.toFixed(2)}%</strong>
               </div>
             </div>
           </div>
@@ -262,7 +262,7 @@ export function ConstructionItemDashboard() {
               </div>
               <div className="summary-card">
                 <span>% Spent (to date)</span>
-                <strong>{metrics.actualPercent.toFixed(1)}%</strong>
+                <strong>{metrics.actualPercent.toFixed(2)}%</strong>
               </div>
             </div>
           </div>

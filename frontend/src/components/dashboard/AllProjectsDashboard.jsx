@@ -590,7 +590,7 @@ export function AllProjectsDashboard() {
                       </div>
                       <div className="summary-card">
                         <span>Elapsed %</span>
-                        <strong>{elapsedDuration.elapsedPercent.toFixed(1)}%</strong>
+                        <strong>{elapsedDuration.elapsedPercent.toFixed(2)}%</strong>
                       </div>
                     </div>
                   </div>
@@ -611,11 +611,11 @@ export function AllProjectsDashboard() {
                     </div>
                     <div className="summary-card">
                       <span>Planned %</span>
-                      <strong>{totalBudgetPlannedPercent.toFixed(1)}%</strong>
+                      <strong>{totalBudgetPlannedPercent.toFixed(2)}%</strong>
                     </div>
                     <div className="summary-card">
                       <span>Actual %</span>
-                      <strong>{totalBudgetActualPercent.toFixed(1)}%</strong>
+                      <strong>{totalBudgetActualPercent.toFixed(2)}%</strong>
                     </div>
                   </div>
                 </div>
@@ -635,11 +635,11 @@ export function AllProjectsDashboard() {
                     </div>
                     <div className="summary-card">
                       <span>Planned %</span>
-                      <strong>{upToDatePlannedPercent.toFixed(1)}%</strong>
+                      <strong>{upToDatePlannedPercent.toFixed(2)}%</strong>
                     </div>
                     <div className="summary-card">
                       <span>Actual %</span>
-                      <strong>{upToDateActualPercent.toFixed(1)}%</strong>
+                      <strong>{upToDateActualPercent.toFixed(2)}%</strong>
                     </div>
                   </div>
                 </div>
@@ -820,7 +820,7 @@ export function AllProjectsDashboard() {
                       type="button"
                       onClick={() =>
                         downloadRowsAsExcel(
-                          statusTableRows.map((r) => ({ Status: r.status, Count: r.count, "% of Villas": r.percent.toFixed(1) })),
+                          statusTableRows.map((r) => ({ Status: r.status, Count: r.count, "% of Villas": r.percent.toFixed(2) })),
                           "Villas by Status",
                           "villas_by_status"
                         )
@@ -842,7 +842,7 @@ export function AllProjectsDashboard() {
                         <tr key={r.status}>
                           <td>{r.status}</td>
                           <td>{r.count}</td>
-                          <td>{r.percent.toFixed(1)}%</td>
+                          <td>{r.percent.toFixed(2)}%</td>
                         </tr>
                       ))}
                     </tbody>
@@ -875,7 +875,7 @@ export function AllProjectsDashboard() {
                       type="button"
                       onClick={() =>
                         downloadRowsAsExcel(
-                          invoiceTableRows.map((r) => ({ Status: r.status, Count: r.count, "% of Item-Invoices": r.percent.toFixed(1) })),
+                          invoiceTableRows.map((r) => ({ Status: r.status, Count: r.count, "% of Item-Invoices": r.percent.toFixed(2) })),
                           "Invoices by Status",
                           "invoices_by_status"
                         )
@@ -900,7 +900,7 @@ export function AllProjectsDashboard() {
                         <tr key={r.status}>
                           <td>{r.status}</td>
                           <td>{r.count}</td>
-                          <td>{r.percent.toFixed(1)}%</td>
+                          <td>{r.percent.toFixed(2)}%</td>
                         </tr>
                       ))}
                     </tbody>
@@ -933,7 +933,7 @@ export function AllProjectsDashboard() {
                       type="button"
                       onClick={() =>
                         downloadRowsAsExcel(
-                          scheduleTableRows.map((r) => ({ Status: r.status, Count: r.count, "% of Item-Records": r.percent.toFixed(1) })),
+                          scheduleTableRows.map((r) => ({ Status: r.status, Count: r.count, "% of Item-Records": r.percent.toFixed(2) })),
                           "Schedule by Status",
                           "schedule_by_status"
                         )
@@ -960,7 +960,7 @@ export function AllProjectsDashboard() {
                         <tr key={r.status}>
                           <td>{r.status}</td>
                           <td>{r.count}</td>
-                          <td>{r.percent.toFixed(1)}%</td>
+                          <td>{r.percent.toFixed(2)}%</td>
                         </tr>
                       ))}
                     </tbody>
@@ -977,13 +977,13 @@ export function AllProjectsDashboard() {
                           categoryTableRows.map((r) => ({
                             Category: r.category,
                             "Total Planned": r.totalPlanned,
-                            "Total Planned %": r.totalPlannedPercent.toFixed(1),
+                            "Total Planned %": r.totalPlannedPercent.toFixed(2),
                             "Total Actual": r.totalActual,
-                            "Total Actual %": r.totalActualPercent.toFixed(1),
+                            "Total Actual %": r.totalActualPercent.toFixed(2),
                             "To-Date Planned": r.toDatePlanned,
-                            "To-Date Planned %": r.toDatePlannedPercent.toFixed(1),
+                            "To-Date Planned %": r.toDatePlannedPercent.toFixed(2),
                             "To-Date Actual": r.toDateActual,
-                            "To-Date Actual %": r.toDateActualPercent.toFixed(1),
+                            "To-Date Actual %": r.toDateActualPercent.toFixed(2),
                           })),
                           "Category Breakdown",
                           "category_breakdown"
@@ -1016,13 +1016,13 @@ export function AllProjectsDashboard() {
                         <tr key={r.category}>
                           <td>{r.category}</td>
                           <td>{formatCurrency(r.totalPlanned)}</td>
-                          <td>{r.totalPlannedPercent.toFixed(1)}%</td>
+                          <td>{r.totalPlannedPercent.toFixed(2)}%</td>
                           <td>{formatCurrency(r.totalActual)}</td>
-                          <td>{r.totalActualPercent.toFixed(1)}%</td>
+                          <td>{r.totalActualPercent.toFixed(2)}%</td>
                           <td>{formatCurrency(r.toDatePlanned)}</td>
-                          <td>{r.toDatePlannedPercent.toFixed(1)}%</td>
+                          <td>{r.toDatePlannedPercent.toFixed(2)}%</td>
                           <td>{formatCurrency(r.toDateActual)}</td>
-                          <td>{r.toDateActualPercent.toFixed(1)}%</td>
+                          <td>{r.toDateActualPercent.toFixed(2)}%</td>
                         </tr>
                       ))}
                     </tbody>
@@ -1109,10 +1109,10 @@ export function AllProjectsDashboard() {
                         <td>{formatPeriodLabel(p, viewType)}</td>
                         <td>{formatCurrency(periods[p].totalCost)}</td>
                         <td>{formatCurrency(periods[p].totalCostActual)}</td>
-                        <td>{periods[p].percentOfTotal.toFixed(1)}%</td>
-                        <td>{periods[p].percentOfTotalActual.toFixed(1)}%</td>
-                        <td>{periods[p].cumPercent.toFixed(1)}%</td>
-                        <td>{periods[p].cumPercentActual.toFixed(1)}%</td>
+                        <td>{periods[p].percentOfTotal.toFixed(2)}%</td>
+                        <td>{periods[p].percentOfTotalActual.toFixed(2)}%</td>
+                        <td>{periods[p].cumPercent.toFixed(2)}%</td>
+                        <td>{periods[p].cumPercentActual.toFixed(2)}%</td>
                       </tr>
                     ))}
                     {sortedPeriods.length === 0 && (
@@ -1194,9 +1194,9 @@ export function AllProjectsDashboard() {
                         <td>{i.item}</td>
                         <td>{i.category}</td>
                         <td>{formatCurrency(i.planned)}</td>
-                        <td>{totalPlannedFiltered > 0 ? ((i.totalBudget / totalPlannedFiltered) * 100).toFixed(1) : "0.0"}%</td>
+                        <td>{totalPlannedFiltered > 0 ? ((i.totalBudget / totalPlannedFiltered) * 100).toFixed(2) : "0.00"}%</td>
                         <td>{formatCurrency(i.actual)}</td>
-                        <td>{totalPlannedFiltered > 0 ? ((i.actual / totalPlannedFiltered) * 100).toFixed(1) : "0.0"}%</td>
+                        <td>{totalPlannedFiltered > 0 ? ((i.actual / totalPlannedFiltered) * 100).toFixed(2) : "0.00"}%</td>
                       </tr>
                     ))}
                     {topItems.length === 0 && (

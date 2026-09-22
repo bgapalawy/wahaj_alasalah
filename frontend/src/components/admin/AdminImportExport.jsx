@@ -29,6 +29,7 @@ export function AdminImportExport() {
   const [importStatus, setImportStatus] = useState("idle"); // idle | working | done | error
   const [importResult, setImportResult] = useState(null);
   const [importError, setImportError] = useState(null);
+  const [importProgress, setImportProgress] = useState({ processedRows: 0, totalRows: 0 });
   const [exportStatus, setExportStatus] = useState("idle");
   const [convertStatus, setConvertStatus] = useState("idle");
   const [convertResult, setConvertResult] = useState(null);
@@ -93,6 +94,7 @@ export function AdminImportExport() {
     setImportStatus("working");
     setImportResult(null);
     setImportError(null);
+    setImportProgress({ processedRows: 0, totalRows: 0 });
 
     try {
       const buffer = await file.arrayBuffer();
@@ -141,8 +143,35 @@ export function AdminImportExport() {
         throw new Error("First column must be the primary key (villaID).");
       }
 
-      const result = await adminApi.importRows(selectedTable, rows, selectedTableMeta?.isDateTable ?? false);
-      setImportResult(result);
+      // Chunked instead of one giant request — a full 956-villa sheet is
+      // tens of thousands of individual cell upserts server-side, which
+      // used to take long enough that the button just sat on "Uploading…"
+      // with no sense of progress the whole time. Splitting into batches
+      // of BATCH_SIZE rows, awaited one at a time (not in parallel — the
+      // backend is already writing each batch at its own internal
+      // concurrency, and firing multiple batches at once would just
+      // contend with itself for the same DB connections) lets the
+      // progress bar move after every batch instead of only at the very
+      // end, and keeps each individual request small enough to stay well
+      // under any request-size/timeout limit regardless of sheet size.
+      const BATCH_SIZE = 50;
+      const isDateTable = selectedTableMeta?.isDateTable ?? false;
+      setImportProgress({ processedRows: 0, totalRows: rows.length });
+
+      let successCount = 0;
+      let errorCount = 0;
+      const errors = [];
+
+      for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+        const batch = rows.slice(i, i + BATCH_SIZE);
+        const batchResult = await adminApi.importRows(selectedTable, batch, isDateTable);
+        successCount += batchResult.successCount;
+        errorCount += batchResult.errorCount;
+        if (errors.length < 50) errors.push(...batchResult.errors.slice(0, 50 - errors.length));
+        setImportProgress({ processedRows: Math.min(i + BATCH_SIZE, rows.length), totalRows: rows.length });
+      }
+
+      setImportResult({ successCount, errorCount, errors });
       setImportStatus("done");
     } catch (err) {
       setImportError(err.message);
@@ -356,6 +385,21 @@ export function AdminImportExport() {
               {importStatus === "working" ? "Uploading…" : "Upload to Database"}
             </button>
           </div>
+
+          {importStatus === "working" && importProgress.totalRows > 0 && (
+            <div className="admin-progress" aria-live="polite">
+              <div className="admin-progress-track">
+                <div
+                  className="admin-progress-fill"
+                  style={{ width: `${Math.round((importProgress.processedRows / importProgress.totalRows) * 100)}%` }}
+                />
+              </div>
+              <p className="admin-progress-label">
+                {importProgress.processedRows} / {importProgress.totalRows} rows (
+                {Math.round((importProgress.processedRows / importProgress.totalRows) * 100)}%)
+              </p>
+            </div>
+          )}
 
           {importStatus === "done" && importResult && (
             <p className="admin-result">
